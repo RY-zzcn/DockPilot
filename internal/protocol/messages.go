@@ -114,6 +114,22 @@ type ComposeProjectSnapshot struct {
 	Content string `json:"content,omitempty"`
 }
 
+type UpdateDetection struct {
+	TargetType  string                 `json:"target_type,omitempty"`
+	TargetID    string                 `json:"target_id,omitempty"`
+	ProjectName string                 `json:"project_name,omitempty"`
+	Path        string                 `json:"path,omitempty"`
+	Images      []ImageUpdateDetection `json:"images"`
+}
+
+type ImageUpdateDetection struct {
+	Image           string `json:"image"`
+	LocalDigest     string `json:"local_digest,omitempty"`
+	RemoteDigest    string `json:"remote_digest,omitempty"`
+	UpdateAvailable bool   `json:"update_available"`
+	Error           string `json:"error,omitempty"`
+}
+
 type TaskPayload struct {
 	ID         string            `json:"id"`
 	Kind       string            `json:"kind"`
@@ -128,10 +144,11 @@ type TaskLogPayload struct {
 }
 
 type TaskResultPayload struct {
-	TaskID   string `json:"task_id"`
-	Status   string `json:"status"`
-	Message  string `json:"message,omitempty"`
-	ExitCode int    `json:"exit_code"`
+	TaskID   string            `json:"task_id"`
+	Status   string            `json:"status"`
+	Message  string            `json:"message,omitempty"`
+	ExitCode int               `json:"exit_code"`
+	Updates  []UpdateDetection `json:"updates,omitempty"`
 }
 
 type ErrorPayload struct {

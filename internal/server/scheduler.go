@@ -77,11 +77,15 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 			if !due(policy, s.lastRun[key]) {
 				continue
 			}
+			kind := "detect_updates"
+			if policy.Mode == PolicyAutomatic {
+				kind = "compose_update"
+			}
 			args := map[string]string{"path": project.Path, "name": project.Name}
 			payload, _ := json.Marshal(args)
 			task, err := s.store.CreateTask(Task{
 				NodeID:      node.ID,
-				Kind:        "compose_update",
+				Kind:        kind,
 				TargetType:  "compose",
 				TargetID:    project.ID,
 				RequestedBy: "scheduler",

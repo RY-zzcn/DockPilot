@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dockpilot/dockpilot/internal/protocol"
@@ -24,7 +26,9 @@ func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, lo
 	var err error
 	switch task.Kind {
 	case "detect_updates":
-		err = t.detectUpdates(taskCtx, task, logLine)
+		var updates []protocol.UpdateDetection
+		updates, err = t.detectUpdates(taskCtx, task, logLine)
+		status.Updates = updates
 	case "compose_update":
 		err = t.composeUpdate(taskCtx, task, logLine)
 	case "compose_deploy":
@@ -46,27 +50,62 @@ func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, lo
 	return status
 }
 
-func (t TaskExecutor) detectUpdates(ctx context.Context, task protocol.TaskPayload, logLine func(string)) error {
+func (t TaskExecutor) detectUpdates(ctx context.Context, task protocol.TaskPayload, logLine func(string)) ([]protocol.UpdateDetection, error) {
 	path := task.Args["path"]
 	if path == "" {
 		projects := t.Docker.composeProjects(ctx)
 		if len(projects) == 0 {
-			logLine("No compose projects found; running docker image list as a lightweight detection pass.")
-			return runLogged(ctx, logLine, "docker", "images")
+			logLine("No compose projects found; running docker image list as a lightweight visibility pass.")
+			return nil, runLogged(ctx, logLine, "docker", "images")
 		}
+		var detections []protocol.UpdateDetection
 		for _, project := range projects {
 			logLine("Checking compose project: " + project.Name)
-			args := append([]string{"compose"}, composeFileArgs(project.Path)...)
-			args = append(args, "pull", "--ignore-buildable")
-			if err := runLogged(ctx, logLine, "docker", args...); err != nil {
-				return err
+			detection, err := t.detectComposeProject(ctx, project.ID, project.Name, project.Path, logLine)
+			detections = append(detections, detection)
+			if err != nil {
+				return detections, err
 			}
 		}
-		return nil
+		return detections, nil
 	}
-	args := append([]string{"compose"}, composeFileArgs(path)...)
-	args = append(args, "pull", "--ignore-buildable")
-	return runLogged(ctx, logLine, "docker", args...)
+	name := task.Args["name"]
+	if name == "" {
+		name = filepath.Base(filepath.Dir(path))
+	}
+	detection, err := t.detectComposeProject(ctx, task.TargetID, name, path, logLine)
+	return []protocol.UpdateDetection{detection}, err
+}
+
+func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name, path string, logLine func(string)) (protocol.UpdateDetection, error) {
+	detection := protocol.UpdateDetection{
+		TargetType:  "compose",
+		TargetID:    projectID,
+		ProjectName: name,
+		Path:        path,
+		Images:      []protocol.ImageUpdateDetection{},
+	}
+	images, err := composeImages(ctx, path)
+	if err != nil {
+		return detection, err
+	}
+	if len(images) == 0 {
+		logLine("No image references found in compose config: " + path)
+		return detection, nil
+	}
+	for _, image := range images {
+		item := detectImageUpdate(ctx, image)
+		detection.Images = append(detection.Images, item)
+		switch {
+		case item.Error != "":
+			logLine(fmt.Sprintf("Image %s check failed: %s", image, item.Error))
+		case item.UpdateAvailable:
+			logLine(fmt.Sprintf("Image %s has update: local %s remote %s", image, shortDigest(item.LocalDigest), shortDigest(item.RemoteDigest)))
+		default:
+			logLine(fmt.Sprintf("Image %s is current: %s", image, shortDigest(nonEmpty(item.LocalDigest, item.RemoteDigest))))
+		}
+	}
+	return detection, nil
 }
 
 func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPayload, logLine func(string)) error {
@@ -119,4 +158,42 @@ func runLogged(ctx context.Context, logLine func(string), name string, args ...s
 		}
 	}
 	return err
+}
+
+func composeImages(ctx context.Context, path string) ([]string, error) {
+	args := append([]string{"compose"}, composeFileArgs(path)...)
+	args = append(args, "config", "--images")
+	out, err := commandCombined(ctx, "docker", args...)
+	if err != nil {
+		return nil, fmt.Errorf("read compose images: %w: %s", err, strings.TrimSpace(out))
+	}
+	seen := map[string]bool{}
+	var images []string
+	for _, line := range strings.Split(out, "\n") {
+		image := strings.TrimSpace(line)
+		if image == "" || seen[image] {
+			continue
+		}
+		seen[image] = true
+		images = append(images, image)
+	}
+	sort.Strings(images)
+	return images, nil
+}
+
+func commandCombined(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func shortDigest(value string) string {
+	value = digestOnly(value)
+	if len(value) > 19 {
+		return value[:19]
+	}
+	if value == "" {
+		return "-"
+	}
+	return value
 }

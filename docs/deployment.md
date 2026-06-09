@@ -188,6 +188,34 @@ curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dock
   --registration-token YOUR_REGISTRATION_TOKEN
 ```
 
+## 更新检测和自动更新
+
+DockPilot 默认不会自动更新容器。未配置策略时，全局策略等价于 `manual`。
+
+检测流程：
+
+- Agent 扫描 `/opt,/srv,/var/www` 等目录中的 Compose 文件，也会读取 `docker compose ls` 中正在运行的项目。
+- `detect_updates` 任务会执行 `docker compose -f <compose.yml> config --images` 获取镜像列表。
+- Agent 使用 `docker image inspect` 读取本地 repo digest。
+- Agent 使用 `docker buildx imagetools inspect`，失败时使用 `docker manifest inspect --verbose` 读取远端 digest。
+- 本地 digest 和远端 digest 不一致，或者本地镜像缺失但远端存在时，会标记为可更新并回传 Server。
+
+频率：
+
+- 心跳：默认 `15 秒`。
+- 指标：默认 `15 秒`，可通过 `DOCKPILOT_METRICS_INTERVAL_SECONDS` 调整。
+- Docker/Compose 快照：默认 `60 秒`，可通过 `DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS` 调整。
+- 策略调度器：Server 每 `1 分钟` 扫描一次策略。
+- 策略执行间隔：由 `@hourly`、`@daily` 或 `interval:<duration>` 控制，例如 `interval:6h`。
+
+策略模式：
+
+- `manual`：只在面板手动点击时检测或更新。
+- `scheduled`：到点只检测并标记可更新项，需要管理员再手动确认更新。
+- `automatic`：到点直接执行 `docker compose pull --ignore-buildable` 和 `docker compose up -d --remove-orphans`。
+
+建议把数据库、缓存、消息队列等状态型服务加入排除列表，或单独配置为 `manual`。
+
 ## 卸载
 
 保留数据：

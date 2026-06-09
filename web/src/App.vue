@@ -288,6 +288,8 @@
             >
               <strong>{{ project.name }}</strong>
               <span>{{ project.path }}</span>
+              <em v-if="project.update_available" class="mini-alert">可更新</em>
+              <em v-else-if="project.checked_at" class="mini-muted">已检测 {{ project.checked_at }}</em>
             </button>
           </div>
           <form class="compose-editor" @submit.prevent="saveCompose">
@@ -348,6 +350,8 @@
               <div>
                 <strong>{{ row.project.name }}</strong>
                 <span>{{ row.project.path }}</span>
+                <em v-if="row.project.update_available" class="mini-alert">可更新</em>
+                <em v-else-if="row.project.checked_at" class="mini-muted">已检测 {{ row.project.checked_at }}</em>
               </div>
               <div class="segmented">
                 <button :class="{ active: row.policy.mode === 'manual' }" @click="row.policy.mode = 'manual'">手动</button>

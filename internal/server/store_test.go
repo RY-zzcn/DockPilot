@@ -79,6 +79,77 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestApplyAndClearUpdateDetections(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	snapshot := protocol.DockerSnapshotPayload{
+		Containers: []protocol.ContainerSnapshot{{
+			ID:             "container-1",
+			Name:           "web",
+			Image:          "nginx:stable",
+			State:          "running",
+			Status:         "Up",
+			ComposeProject: "site",
+		}},
+		ComposeProjects: []protocol.ComposeProjectSnapshot{{
+			ID:   "compose-1",
+			Name: "site",
+			Path: "/opt/site/compose.yml",
+		}},
+	}
+	if err := store.ReplaceDockerSnapshot("node-1", snapshot); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	count, err := store.ApplyUpdateDetections("node-1", []protocol.UpdateDetection{{
+		TargetType:  "compose",
+		TargetID:    "compose-1",
+		ProjectName: "site",
+		Path:        "/opt/site/compose.yml",
+		Images: []protocol.ImageUpdateDetection{{
+			Image:           "nginx:stable",
+			LocalDigest:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			RemoteDigest:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			UpdateAvailable: true,
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("apply detections: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one available update, got %d", count)
+	}
+	state, err := store.DockerState("node-1")
+	if err != nil {
+		t.Fatalf("docker state: %v", err)
+	}
+	if !state.Containers[0].UpdateAvailable {
+		t.Fatalf("container update flag was not set")
+	}
+	if !state.ComposeProjects[0].UpdateAvailable || state.ComposeProjects[0].CheckedAt == "" {
+		t.Fatalf("compose update metadata was not set: %#v", state.ComposeProjects[0])
+	}
+	task := Task{
+		NodeID:     "node-1",
+		Kind:       "compose_update",
+		TargetType: "compose",
+		TargetID:   "compose-1",
+		Payload:    `{"name":"site"}`,
+	}
+	if err := store.ClearUpdateAvailabilityForTask(task); err != nil {
+		t.Fatalf("clear update flags: %v", err)
+	}
+	state, err = store.DockerState("node-1")
+	if err != nil {
+		t.Fatalf("docker state after clear: %v", err)
+	}
+	if state.Containers[0].UpdateAvailable || state.ComposeProjects[0].UpdateAvailable {
+		t.Fatalf("update flags were not cleared: %#v %#v", state.Containers[0], state.ComposeProjects[0])
+	}
+}
+
 func testHello(nodeID string) protocol.HelloPayload {
 	return protocol.HelloPayload{
 		NodeID:            nodeID,

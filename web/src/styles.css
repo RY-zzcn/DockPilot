@@ -565,6 +565,33 @@ small,
   white-space: nowrap;
 }
 
+.mini-alert,
+.mini-muted {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 22px;
+  align-items: center;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.mini-alert {
+  border: 1px solid rgba(255, 209, 102, 0.28);
+  background: rgba(255, 209, 102, 0.1);
+  color: var(--amber);
+}
+
+.mini-muted {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+}
+
 .status-dot {
   width: 10px;
   height: 10px;

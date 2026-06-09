@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -249,6 +250,16 @@ func (h *AgentHub) handleAgentMessage(msg protocol.Message) {
 			status := TaskSuccess
 			if payload.Status != TaskSuccess {
 				status = TaskFailed
+			}
+			task, _ := h.store.GetTask(payload.TaskID)
+			if status == TaskSuccess && len(payload.Updates) > 0 {
+				count, err := h.store.ApplyUpdateDetections(msg.NodeID, payload.Updates)
+				if err == nil && count > 0 {
+					h.notifier.Notify("warning", "更新可用", payload.TaskID+" 检测到 "+fmt.Sprint(count)+" 个镜像可更新")
+				}
+			}
+			if status == TaskSuccess && (task.Kind == "compose_update" || task.Kind == "compose_deploy") {
+				_ = h.store.ClearUpdateAvailabilityForTask(task)
 			}
 			raw, _ := json.Marshal(payload)
 			_ = h.store.FinishTask(payload.TaskID, status, string(raw))

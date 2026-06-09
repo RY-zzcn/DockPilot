@@ -83,6 +83,8 @@ export interface ComposeProject {
   managed: boolean
   content: string
   version: number
+  update_available: boolean
+  checked_at: string
   last_seen: string
   updated_at: string
 }

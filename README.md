@@ -130,10 +130,19 @@ go run ./cmd/agent \
 支持模式：
 
 - `manual`：默认模式，只检测或手动执行。
-- `scheduled`：按 `@hourly`、`@daily` 或 `interval:6h` 触发。
+- `scheduled`：按 `@hourly`、`@daily` 或 `interval:6h` 触发检测，只标记可更新项，不自动部署。
 - `automatic`：按计划直接执行 Compose 更新。
 
 `exclude_patterns` 使用英文逗号分隔，匹配项目名称或路径。建议把 `mysql`、`postgres`、`mariadb`、`redis` 等状态型服务保持手动更新。
+
+### 更新检测方式与频率
+
+- 手动检测：在节点页或更新中心点击检测，会创建 `detect_updates` 任务。
+- 自动检测：Server 调度器每 `1 分钟` 扫描一次策略；真正执行频率由策略决定，支持 `@hourly`、`@daily` 和 `interval:<duration>`，例如 `interval:6h`。
+- 默认策略：没有显式保存策略时为 `manual`，不会自动检测或更新。
+- Agent 快照：Agent 默认每 `60 秒` 同步 Docker/Compose 状态，每 `15 秒` 上报心跳和基础指标。
+- 检测逻辑：Agent 对 Compose 项目运行 `docker compose config --images`，再通过本地 `docker image inspect` 与远端 `docker buildx imagetools inspect` / `docker manifest inspect --verbose` 获取 digest，比较本地和远端 digest 后回传 `update_available`。
+- 更新逻辑：手动执行或 `automatic` 策略会运行 `docker compose pull --ignore-buildable`，随后运行 `docker compose up -d --remove-orphans`。更新成功后会清除该项目的可更新标记。
 
 ## API 概览
 

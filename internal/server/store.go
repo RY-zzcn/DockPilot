@@ -95,15 +95,17 @@ type Image struct {
 }
 
 type ComposeProject struct {
-	ID        string `json:"id"`
-	NodeID    string `json:"node_id"`
-	Name      string `json:"name"`
-	Path      string `json:"path"`
-	Managed   bool   `json:"managed"`
-	Content   string `json:"content,omitempty"`
-	Version   int    `json:"version"`
-	LastSeen  string `json:"last_seen"`
-	UpdatedAt string `json:"updated_at"`
+	ID              string `json:"id"`
+	NodeID          string `json:"node_id"`
+	Name            string `json:"name"`
+	Path            string `json:"path"`
+	Managed         bool   `json:"managed"`
+	Content         string `json:"content,omitempty"`
+	Version         int    `json:"version"`
+	UpdateAvailable bool   `json:"update_available"`
+	CheckedAt       string `json:"checked_at"`
+	LastSeen        string `json:"last_seen"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 type Task struct {
@@ -273,6 +275,8 @@ CREATE TABLE IF NOT EXISTS compose_projects (
   managed INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL DEFAULT '',
   version INTEGER NOT NULL DEFAULT 1,
+  update_available INTEGER NOT NULL DEFAULT 0,
+  checked_at TEXT NOT NULL DEFAULT '',
   last_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   PRIMARY KEY(node_id, id),
@@ -348,7 +352,38 @@ CREATE INDEX IF NOT EXISTS idx_metrics_node_recorded ON node_metrics(node_id, re
 CREATE INDEX IF NOT EXISTS idx_tasks_node_created ON tasks(node_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 `
-	_, err := s.db.Exec(schema)
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "update_available", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return s.ensureColumn("compose_projects", "checked_at", "TEXT NOT NULL DEFAULT ''")
+}
+
+func (s *Store) ensureColumn(table, column, definition string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
 	return err
 }
 
@@ -526,6 +561,29 @@ func (s *Store) ReplaceDockerSnapshot(nodeID string, snapshot protocol.DockerSna
 		return err
 	}
 	defer tx.Rollback()
+	previousByID := map[string]bool{}
+	previousByImage := map[string]bool{}
+	rows, err := tx.Query(`SELECT id, image, compose_project, update_available FROM containers WHERE node_id = ?`, nodeID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, image, composeProject string
+		var available bool
+		if err := rows.Scan(&id, &image, &composeProject, boolScanner(&available)); err != nil {
+			rows.Close()
+			return err
+		}
+		if available {
+			previousByID[id] = true
+			previousByImage[composeProject+"\x00"+image] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
 	if _, err := tx.Exec(`DELETE FROM containers WHERE node_id = ?`, nodeID); err != nil {
 		return err
 	}
@@ -533,17 +591,13 @@ func (s *Store) ReplaceDockerSnapshot(nodeID string, snapshot protocol.DockerSna
 		return err
 	}
 	for _, container := range snapshot.Containers {
+		updateAvailable := container.UpdateAvailable || previousByID[container.ID] || previousByImage[container.ComposeProject+"\x00"+container.Image]
 		_, err := tx.Exec(`
-INSERT INTO containers(id, node_id, name, image, state, status, compose_project, updated_at)
-VALUES(?,?,?,?,?,?,?,datetime('now','localtime'))`,
-			container.ID, nodeID, container.Name, container.Image, container.State, container.Status, container.ComposeProject)
+INSERT INTO containers(id, node_id, name, image, state, status, compose_project, update_available, updated_at)
+VALUES(?,?,?,?,?,?,?,?,datetime('now','localtime'))`,
+			container.ID, nodeID, container.Name, container.Image, container.State, container.Status, container.ComposeProject, boolInt(updateAvailable))
 		if err != nil {
 			return err
-		}
-		if container.UpdateAvailable {
-			if _, err := tx.Exec(`UPDATE containers SET update_available = 1 WHERE node_id = ? AND id = ?`, nodeID, container.ID); err != nil {
-				return err
-			}
 		}
 	}
 	for _, image := range snapshot.Images {
@@ -574,6 +628,99 @@ ON CONFLICT(node_id, id) DO UPDATE SET
 	return tx.Commit()
 }
 
+func (s *Store) ApplyUpdateDetections(nodeID string, detections []protocol.UpdateDetection) (int, error) {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	availableCount := 0
+	for _, detection := range detections {
+		projectAvailable := false
+		for _, image := range detection.Images {
+			if image.UpdateAvailable {
+				projectAvailable = true
+				availableCount++
+			}
+		}
+		if detection.TargetID != "" {
+			if _, err := tx.Exec(`
+UPDATE compose_projects
+SET update_available = ?, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
+WHERE node_id = ? AND id = ?`, boolInt(projectAvailable), nodeID, detection.TargetID); err != nil {
+				return 0, err
+			}
+		} else if detection.Path != "" {
+			if _, err := tx.Exec(`
+UPDATE compose_projects
+SET update_available = ?, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
+WHERE node_id = ? AND path = ?`, boolInt(projectAvailable), nodeID, detection.Path); err != nil {
+				return 0, err
+			}
+		}
+		if detection.ProjectName != "" {
+			if _, err := tx.Exec(`UPDATE containers SET update_available = 0, updated_at = datetime('now','localtime') WHERE node_id = ? AND compose_project = ?`, nodeID, detection.ProjectName); err != nil {
+				return 0, err
+			}
+		}
+		for _, image := range detection.Images {
+			if !image.UpdateAvailable {
+				continue
+			}
+			if detection.ProjectName != "" {
+				if _, err := tx.Exec(`UPDATE containers SET update_available = 1, updated_at = datetime('now','localtime') WHERE node_id = ? AND compose_project = ? AND image = ?`, nodeID, detection.ProjectName, image.Image); err != nil {
+					return 0, err
+				}
+			} else {
+				if _, err := tx.Exec(`UPDATE containers SET update_available = 1, updated_at = datetime('now','localtime') WHERE node_id = ? AND image = ?`, nodeID, image.Image); err != nil {
+					return 0, err
+				}
+			}
+		}
+	}
+	return availableCount, tx.Commit()
+}
+
+func (s *Store) ClearUpdateAvailabilityForTask(task Task) error {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	switch task.TargetType {
+	case "compose":
+		projectName := taskPayloadArg(task.Payload, "name")
+		if task.TargetID != "" {
+			_ = tx.QueryRow(`SELECT name FROM compose_projects WHERE node_id = ? AND id = ?`, task.NodeID, task.TargetID).Scan(&projectName)
+			if _, err := tx.Exec(`
+UPDATE compose_projects
+SET update_available = 0, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
+WHERE node_id = ? AND id = ?`, task.NodeID, task.TargetID); err != nil {
+				return err
+			}
+		}
+		if projectName != "" {
+			if _, err := tx.Exec(`UPDATE containers SET update_available = 0, updated_at = datetime('now','localtime') WHERE node_id = ? AND compose_project = ?`, task.NodeID, projectName); err != nil {
+				return err
+			}
+		}
+	case "container":
+		if task.TargetID != "" {
+			if _, err := tx.Exec(`UPDATE containers SET update_available = 0, updated_at = datetime('now','localtime') WHERE node_id = ? AND id = ?`, task.NodeID, task.TargetID); err != nil {
+				return err
+			}
+		}
+	default:
+		if _, err := tx.Exec(`UPDATE compose_projects SET update_available = 0, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE node_id = ?`, task.NodeID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE containers SET update_available = 0, updated_at = datetime('now','localtime') WHERE node_id = ?`, task.NodeID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *Store) DockerState(nodeID string) (DockerState, error) {
 	state := DockerState{
 		Containers:      []Container{},
@@ -588,7 +735,7 @@ func (s *Store) DockerState(nodeID string) (DockerState, error) {
 	if err != nil {
 		return state, err
 	}
-	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, content, version, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
+	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
 	if err != nil {
 		return state, err
 	}
@@ -636,8 +783,8 @@ ON CONFLICT(node_id, id) DO UPDATE SET
 
 func (s *Store) GetComposeProject(nodeID, projectID string) (ComposeProject, error) {
 	var project ComposeProject
-	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
-		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, &project.LastSeen, &project.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
+		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
@@ -943,7 +1090,7 @@ func scanImage(rows *sql.Rows) (Image, error) {
 
 func scanComposeProject(rows *sql.Rows) (ComposeProject, error) {
 	var project ComposeProject
-	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, &project.LastSeen, &project.UpdatedAt)
+	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
@@ -959,6 +1106,12 @@ func boolInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func taskPayloadArg(payload, key string) string {
+	args := map[string]string{}
+	_ = json.Unmarshal([]byte(payload), &args)
+	return args[key]
 }
 
 type boolScanTarget struct {
