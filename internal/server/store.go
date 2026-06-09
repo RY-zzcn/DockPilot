@@ -404,7 +404,7 @@ func (s *Store) ListUsers() ([]User, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var users []User
+	users := []User{}
 	for rows.Next() {
 		var user User
 		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt); err != nil {
@@ -475,7 +475,7 @@ func (s *Store) ListNodes() ([]Node, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var nodes []Node
+	nodes := []Node{}
 	for rows.Next() {
 		var node Node
 		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.CreatedAt, &node.UpdatedAt); err != nil {
@@ -498,7 +498,7 @@ func (s *Store) MarkStaleNodesOffline(timeout time.Duration) ([]Node, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var stale []Node
+	stale := []Node{}
 	for rows.Next() {
 		var node Node
 		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.CreatedAt, &node.UpdatedAt); err != nil {
@@ -575,7 +575,11 @@ ON CONFLICT(node_id, id) DO UPDATE SET
 }
 
 func (s *Store) DockerState(nodeID string) (DockerState, error) {
-	var state DockerState
+	state := DockerState{
+		Containers:      []Container{},
+		Images:          []Image{},
+		ComposeProjects: []ComposeProject{},
+	}
 	containers, err := queryRows(s.db, `SELECT id, node_id, name, image, state, status, compose_project, update_available, updated_at FROM containers WHERE node_id = ? ORDER BY name`, scanContainer, nodeID)
 	if err != nil {
 		return state, err
@@ -673,7 +677,7 @@ func (s *Store) ListTasks(limit int) ([]Task, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var tasks []Task
+	tasks := []Task{}
 	for rows.Next() {
 		var task Task
 		if err := rows.Scan(&task.ID, &task.NodeID, &task.Kind, &task.TargetType, &task.TargetID, &task.Status, &task.RequestedBy, &task.PolicyID, &task.Payload, &task.Result, &task.CreatedAt, &task.StartedAt, &task.FinishedAt); err != nil {
@@ -690,7 +694,7 @@ func (s *Store) PendingTasksForNode(nodeID string) ([]Task, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var tasks []Task
+	tasks := []Task{}
 	for rows.Next() {
 		var task Task
 		if err := rows.Scan(&task.ID, &task.NodeID, &task.Kind, &task.TargetType, &task.TargetID, &task.Status, &task.RequestedBy, &task.PolicyID, &task.Payload, &task.Result, &task.CreatedAt, &task.StartedAt, &task.FinishedAt); err != nil {
@@ -722,7 +726,7 @@ func (s *Store) TaskLogs(taskID string) ([]TaskLog, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var logs []TaskLog
+	logs := []TaskLog{}
 	for rows.Next() {
 		var log TaskLog
 		if err := rows.Scan(&log.ID, &log.TaskID, &log.Line, &log.CreatedAt); err != nil {
@@ -739,7 +743,7 @@ func (s *Store) ListPolicies() ([]Policy, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var policies []Policy
+	policies := []Policy{}
 	for rows.Next() {
 		var policy Policy
 		if err := rows.Scan(&policy.ID, &policy.Scope, &policy.ScopeID, &policy.Mode, &policy.Schedule, &policy.ExcludePatterns, boolScanner(&policy.Enabled), &policy.UpdatedAt); err != nil {
@@ -826,7 +830,7 @@ func (s *Store) ListNotifications() ([]Notification, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var notifications []Notification
+	notifications := []Notification{}
 	for rows.Next() {
 		var notification Notification
 		if err := rows.Scan(&notification.ID, &notification.Name, &notification.Channel, &notification.Config, boolScanner(&notification.Enabled), &notification.CreatedAt, &notification.UpdatedAt); err != nil {
@@ -869,7 +873,7 @@ func (s *Store) EnabledNotifications() ([]Notification, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var notifications []Notification
+	notifications := []Notification{}
 	for rows.Next() {
 		var notification Notification
 		if err := rows.Scan(&notification.ID, &notification.Name, &notification.Channel, &notification.Config, boolScanner(&notification.Enabled), &notification.CreatedAt, &notification.UpdatedAt); err != nil {
@@ -914,7 +918,7 @@ func queryRows[T any](db *sql.DB, query string, scan func(*sql.Rows) (T, error),
 		return nil, err
 	}
 	defer rows.Close()
-	var out []T
+	out := []T{}
 	for rows.Next() {
 		item, err := scan(rows)
 		if err != nil {

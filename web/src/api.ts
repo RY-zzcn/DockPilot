@@ -41,6 +41,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T
 }
 
+function asArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
 export const api = {
   async login(username: string, password: string) {
     return request<{ token: string; user: User }>('/api/auth/login', {
@@ -50,7 +54,7 @@ export const api = {
   },
   me: () => request<AuthClaims>('/api/auth/me'),
   overview: () => request<Overview>('/api/overview'),
-  nodes: () => request<Node[]>('/api/nodes'),
+  nodes: async () => asArray(await request<Node[] | null>('/api/nodes')),
   node: (id: string) => request<{ node: Node; online: boolean; docker: DockerState }>(`/api/nodes/${id}`),
   dockerState: (nodeId: string) => request<DockerState>(`/api/docker/state?node_id=${encodeURIComponent(nodeId)}`),
   saveCompose: (body: {
@@ -65,7 +69,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body)
     }),
-  tasks: () => request<Task[]>('/api/tasks?limit=100'),
+  tasks: async () => asArray(await request<Task[] | null>('/api/tasks?limit=100')),
   createTask: (body: {
     node_id: string
     kind: string
@@ -77,21 +81,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body)
     }),
-  taskLogs: (id: string) => request<TaskLog[]>(`/api/tasks/${id}/logs`),
+  taskLogs: async (id: string) => asArray(await request<TaskLog[] | null>(`/api/tasks/${id}/logs`)),
   cancelTask: (id: string) => request<{ status: string }>(`/api/tasks/${id}/cancel`, { method: 'POST' }),
-  policies: () => request<Policy[]>('/api/policies'),
+  policies: async () => asArray(await request<Policy[] | null>('/api/policies')),
   savePolicy: (policy: Policy) =>
     request<Policy>('/api/policies', {
       method: 'PUT',
       body: JSON.stringify(policy)
     }),
-  notifications: () => request<Notification[]>('/api/notifications'),
+  notifications: async () => asArray(await request<Notification[] | null>('/api/notifications')),
   saveNotification: (notification: Notification) =>
     request<Notification>('/api/notifications', {
       method: 'PUT',
       body: JSON.stringify(notification)
     }),
-  users: () => request<User[]>('/api/users'),
+  users: async () => asArray(await request<User[] | null>('/api/users')),
   createUser: (body: { username: string; password: string; role: string }) =>
     request<User>('/api/users', {
       method: 'POST',
