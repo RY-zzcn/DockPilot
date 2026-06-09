@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version, for example v0.1.0'
+        description: 'Release version, for example v0.1.1'
         required: true
         type: string
 
@@ -22,16 +22,42 @@ env:
 
 jobs:
   build-binaries:
-    name: Build binaries (${{ matrix.goos }}/${{ matrix.goarch }})
+    name: Build binaries (${{ matrix.suffix }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: linux
+          - suffix: linux_amd64
+            goos: linux
             goarch: amd64
-          - goos: linux
+            goarm: ''
+            server_bundle: true
+          - suffix: linux_arm64
+            goos: linux
             goarch: arm64
+            goarm: ''
+            server_bundle: true
+          - suffix: linux_armv7
+            goos: linux
+            goarch: arm
+            goarm: '7'
+            server_bundle: false
+          - suffix: linux_armv6
+            goos: linux
+            goarch: arm
+            goarm: '6'
+            server_bundle: false
+          - suffix: linux_386
+            goos: linux
+            goarch: '386'
+            goarm: ''
+            server_bundle: false
+          - suffix: linux_riscv64
+            goos: linux
+            goarch: riscv64
+            goarm: ''
+            server_bundle: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,6 +81,7 @@ jobs:
           go-version: '1.23.x'
 
       - name: Set up Node
+        if: matrix.server_bundle
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -62,31 +89,66 @@ jobs:
           cache-dependency-path: web/package.json
 
       - name: Build web
+        if: matrix.server_bundle
         working-directory: web
         run: |
           npm install
           npm run build
 
       - name: Build and package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          SERVER_BUNDLE: ${{ matrix.server_bundle }}
+          SUFFIX: ${{ matrix.suffix }}
+          VERSION: ${{ steps.vars.outputs.clean_version }}
+          BUILD_DATE: ${{ steps.vars.outputs.build_date }}
         run: |
           set -euo pipefail
-          LDFLAGS="-s -w -X github.com/dockpilot/dockpilot/internal/version.Version=${{ steps.vars.outputs.clean_version }} -X github.com/dockpilot/dockpilot/internal/version.Commit=${GITHUB_SHA} -X github.com/dockpilot/dockpilot/internal/version.BuildDate=${{ steps.vars.outputs.build_date }}"
-          PACKAGE_DIR="dist/package"
-          mkdir -p "${PACKAGE_DIR}/web" "${PACKAGE_DIR}/deploy"
+          LDFLAGS="-s -w -X github.com/dockpilot/dockpilot/internal/version.Version=${VERSION} -X github.com/dockpilot/dockpilot/internal/version.Commit=${GITHUB_SHA} -X github.com/dockpilot/dockpilot/internal/version.BuildDate=${BUILD_DATE}"
+          export GOOS GOARCH GOARM CGO_ENABLED=0
+          mkdir -p dist
 
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -mod=mod -ldflags "${LDFLAGS}" -o "${PACKAGE_DIR}/dockpilot-server" ./cmd/server
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -mod=mod -ldflags "${LDFLAGS}" -o "${PACKAGE_DIR}/dockpilot-agent" ./cmd/agent
+          AGENT_DIR="dist/agent-package"
+          rm -rf "${AGENT_DIR}"
+          mkdir -p "${AGENT_DIR}/deploy" "${AGENT_DIR}/scripts" "${AGENT_DIR}/docs"
+          go build -mod=mod -ldflags "${LDFLAGS}" -o "${AGENT_DIR}/dockpilot-agent" ./cmd/agent
+          cp deploy/dockpilot-agent.service "${AGENT_DIR}/deploy/"
+          cp scripts/dockpilot-install.sh "${AGENT_DIR}/scripts/"
+          cp README.md "${AGENT_DIR}/"
+          cp docs/deployment.md "${AGENT_DIR}/docs/"
+          tar -C "${AGENT_DIR}" -czf "dist/dockpilot-agent_${VERSION}_${SUFFIX}.tar.gz" .
 
-          cp -R web/dist "${PACKAGE_DIR}/web/dist"
-          cp deploy/docker-compose.yml deploy/dockpilot-server.service deploy/dockpilot-agent.service "${PACKAGE_DIR}/deploy/"
-          cp README.md "${PACKAGE_DIR}/"
+          if [ "${SERVER_BUNDLE}" = "true" ]; then
+            SERVER_DIR="dist/server-package"
+            rm -rf "${SERVER_DIR}"
+            mkdir -p "${SERVER_DIR}/deploy" "${SERVER_DIR}/scripts" "${SERVER_DIR}/docs" "${SERVER_DIR}/web"
+            go build -mod=mod -ldflags "${LDFLAGS}" -o "${SERVER_DIR}/dockpilot-server" ./cmd/server
+            cp -R web/dist "${SERVER_DIR}/web/dist"
+            cp deploy/docker-compose.yml deploy/dockpilot-server.service "${SERVER_DIR}/deploy/"
+            cp scripts/dockpilot-install.sh "${SERVER_DIR}/scripts/"
+            cp README.md "${SERVER_DIR}/"
+            cp docs/deployment.md "${SERVER_DIR}/docs/"
+            tar -C "${SERVER_DIR}" -czf "dist/dockpilot-server_${VERSION}_${SUFFIX}.tar.gz" .
 
-          tar -C "${PACKAGE_DIR}" -czf "dist/dockpilot_${{ steps.vars.outputs.clean_version }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" .
+            FULL_DIR="dist/full-package"
+            rm -rf "${FULL_DIR}"
+            mkdir -p "${FULL_DIR}/deploy" "${FULL_DIR}/scripts" "${FULL_DIR}/docs" "${FULL_DIR}/web"
+            cp "${SERVER_DIR}/dockpilot-server" "${FULL_DIR}/dockpilot-server"
+            cp "${AGENT_DIR}/dockpilot-agent" "${FULL_DIR}/dockpilot-agent"
+            cp -R web/dist "${FULL_DIR}/web/dist"
+            cp deploy/docker-compose.yml deploy/dockpilot-server.service deploy/dockpilot-agent.service "${FULL_DIR}/deploy/"
+            cp scripts/dockpilot-install.sh "${FULL_DIR}/scripts/"
+            cp README.md "${FULL_DIR}/"
+            cp docs/deployment.md "${FULL_DIR}/docs/"
+            tar -C "${FULL_DIR}" -czf "dist/dockpilot_${VERSION}_${SUFFIX}.tar.gz" .
+          fi
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dockpilot_${{ steps.vars.outputs.clean_version }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          name: dockpilot_${{ steps.vars.outputs.clean_version }}_${{ matrix.suffix }}
           path: dist/*.tar.gz
           if-no-files-found: error
 
@@ -102,9 +164,7 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             TAG="${{ inputs.version }}"
           fi
-          CLEAN_VERSION="${TAG#v}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "clean_version=${CLEAN_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
         uses: actions/download-artifact@v4

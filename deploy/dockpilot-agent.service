@@ -11,6 +11,7 @@ Environment=DOCKPILOT_REGISTRATION_TOKEN=change-me-registration-token
 Environment=DOCKPILOT_STATE_PATH=/var/lib/dockpilot-agent/agent.json
 Environment=DOCKPILOT_COMPOSE_DIRS=/opt,/srv,/var/www
 Environment=TZ=Asia/Shanghai
+EnvironmentFile=-/etc/dockpilot/agent.env
 ExecStart=/opt/dockpilot-agent/dockpilot-agent
 Restart=always
 RestartSec=5

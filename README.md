@@ -1,17 +1,97 @@
 # DockPilot
 
-DockPilot 是一个轻量的 Docker / Docker Compose 节点管理面板。它采用中心 Server + VPS Agent 架构，Agent 主动连接 Server，适合防火墙或 NAT 后的 Linux VPS。
+DockPilot 是一个轻量的 Docker / Docker Compose 节点管理面板，采用中心 Server + VPS Agent 架构。Agent 主动连接 Server，适合 NAT、防火墙后面的 Linux VPS，用于集中查看节点资源、容器状态、Compose 项目和更新任务。
 
 ## 功能
 
-- 节点式管理：节点上线、离线、系统资源、Docker 版本、Compose 版本。
-- Docker 资产：容器、镜像、Compose 项目扫描。
-- 更新中心：手动检测、手动更新、按策略定时或全自动更新 Compose 项目。
-- 任务中心：任务状态、实时回传日志、失败结果保存。
-- Compose 混合管理：扫描宿主机已有项目，也支持面板保存 compose.yml 并下发部署。
-- 简洁 RBAC：管理员可操作，viewer 只读。
+- 节点管理：在线/离线、CPU、内存、磁盘、网络、Docker/Compose 版本。
+- Docker 资产：容器、镜像、Compose 项目扫描和状态同步。
+- 更新中心：手动检测、手动确认更新、定时自动、全自动策略。
+- Compose 管理：扫描已有 Compose 项目，也可在面板中托管 compose.yml 并下发部署。
+- 任务中心：任务状态、日志回传、失败原因、重试入口。
 - 通知渠道：Telegram、Webhook、Email。
-- 默认数据库：SQLite。
+- 权限控制：管理员可操作，viewer 只读。
+- 北京时间：默认 `Asia/Shanghai`，面板、任务、日志、指标按北京时间展示和写入。
+- 多主题 UI：极光、石墨、日冕、终端四种现代化运维面板主题。
+
+## 快速部署
+
+推荐先部署 Server，再到面板设置页复制 Agent 接入命令。
+
+### 一键部署 Server
+
+Docker 方式：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-server-docker
+```
+
+二进制 + systemd 方式：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-server-binary
+```
+
+脚本会输出管理员账号、管理员密码和 Agent 注册 token。默认端口为 `8080`。
+
+### 一键接入 Agent
+
+Agent 二进制方式更轻，适合像探针项目一样快速接入多架构节点：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-agent-binary \
+  --server-url http://YOUR_SERVER:8080 \
+  --registration-token YOUR_REGISTRATION_TOKEN
+```
+
+Agent Docker 方式：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-agent-docker \
+  --server-url http://YOUR_SERVER:8080 \
+  --registration-token YOUR_REGISTRATION_TOKEN
+```
+
+### 卸载
+
+保留数据卸载：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall
+```
+
+删除程序和数据：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall --purge
+```
+
+更完整的部署、升级、离线安装和排障说明见 [docs/deployment.md](docs/deployment.md)。
+
+## 发布产物
+
+每次推送 `v*` 标签会自动创建 GitHub Release，并发布 Docker Packages。
+
+Release 二进制包：
+
+- `dockpilot-server_<version>_linux_amd64.tar.gz`
+- `dockpilot-server_<version>_linux_arm64.tar.gz`
+- `dockpilot-agent_<version>_linux_amd64.tar.gz`
+- `dockpilot-agent_<version>_linux_arm64.tar.gz`
+- `dockpilot-agent_<version>_linux_armv7.tar.gz`
+- `dockpilot-agent_<version>_linux_armv6.tar.gz`
+- `dockpilot-agent_<version>_linux_386.tar.gz`
+- `dockpilot-agent_<version>_linux_riscv64.tar.gz`
+- `dockpilot_<version>_linux_amd64.tar.gz` 和 `dockpilot_<version>_linux_arm64.tar.gz` 完整包，包含 Server、Agent、前端和部署模板。
+
+Docker 镜像：
+
+```bash
+docker pull ghcr.io/ry-zzcn/dockpilot-server:latest
+docker pull ghcr.io/ry-zzcn/dockpilot-agent:latest
+```
+
+Docker 镜像当前发布 `linux_amd64` 和 `linux_arm64`，标签会同步发布 `latest`、`v<version>` 和 `<version>`。
 
 ## 本地开发
 
@@ -39,49 +119,15 @@ go run ./cmd/agent \
 
 默认登录账号是 `admin` / `admin`。生产环境必须设置 `DOCKPILOT_ADMIN_PASSWORD`、`DOCKPILOT_AUTH_SECRET` 和 `DOCKPILOT_AGENT_REGISTRATION_TOKEN`。
 
-默认时区为北京时间 `Asia/Shanghai`。Server 会按该时区写入节点心跳、指标、任务、通知和审计时间；Docker / systemd 部署模板也会设置 `TZ=Asia/Shanghai`。如需覆盖，可设置：
-
-```bash
-DOCKPILOT_TIMEZONE=Asia/Shanghai
-TZ=Asia/Shanghai
-```
-
-## Docker 部署
-
-```bash
-cd deploy
-docker compose up -d server
-```
-
-在需要被管理的 VPS 上运行 Agent：
-
-```bash
-docker run -d --name dockpilot-agent --restart unless-stopped \
-  -e DOCKPILOT_SERVER_URL=http://YOUR_SERVER:8080 \
-  -e DOCKPILOT_REGISTRATION_TOKEN=YOUR_REGISTRATION_TOKEN \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt:/opt \
-  -v /srv:/srv \
-  -v /var/www:/var/www \
-  ghcr.io/ry-zzcn/dockpilot-agent:latest
-```
-
-可直接使用 GitHub Packages 镜像：
-
-```bash
-docker pull ghcr.io/ry-zzcn/dockpilot-server:latest
-docker pull ghcr.io/ry-zzcn/dockpilot-agent:latest
-```
-
 ## 更新策略
 
-策略优先级固定为：
+策略优先级：
 
 ```text
 容器 / Compose 项目 > 节点 > 全局
 ```
 
-支持的模式：
+支持模式：
 
 - `manual`：默认模式，只检测或手动执行。
 - `scheduled`：按 `@hourly`、`@daily` 或 `interval:6h` 触发。
@@ -100,23 +146,6 @@ docker pull ghcr.io/ry-zzcn/dockpilot-agent:latest
 - `/api/notifications/*`：Telegram、Webhook、Email 通知配置。
 - `/api/agent/ws`：Agent WebSocket 通道。
 
-## 版本发布
-
-推送 `v*` 标签会触发 GitHub Actions 发布流程：
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-发布流程会生成：
-
-- GitHub Release 二进制包：`dockpilot_<version>_linux_amd64.tar.gz`、`dockpilot_<version>_linux_arm64.tar.gz`。
-- GitHub Packages 镜像：`ghcr.io/ry-zzcn/dockpilot-server:<version>`、`ghcr.io/ry-zzcn/dockpilot-agent:<version>`。
-- 同步推送 `latest`、`v<version>` 和 `<version>` 镜像标签。
-
-二进制包内包含 `dockpilot-server`、`dockpilot-agent`、`web/dist`、Docker Compose 示例和 systemd 服务模板。构建时会注入版本号、Git commit 和构建时间，可在面板设置页或 `/api/version` 查看。
-
 ## 安全提示
 
-Agent 需要访问宿主机 `/var/run/docker.sock`，这等价于较高的宿主机控制权限。请只把 Agent 部署在你信任的 VPS 上，并为 Server 配置 HTTPS、强随机密钥和强管理员密码。
+Agent 需要访问宿主机 `/var/run/docker.sock`，这等价于较高的宿主机控制权限。请只把 Agent 部署在可信 VPS 上，并为 Server 配置 HTTPS、强随机密钥和强管理员密码。

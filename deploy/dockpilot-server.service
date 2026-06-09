@@ -19,6 +19,7 @@ Environment=DOCKPILOT_ADMIN_USER=admin
 Environment=DOCKPILOT_ADMIN_PASSWORD=admin
 Environment=DOCKPILOT_AUTH_SECRET=change-me-auth-secret
 Environment=DOCKPILOT_AGENT_REGISTRATION_TOKEN=change-me-registration-token
+EnvironmentFile=-/etc/dockpilot/server.env
 ExecStart=/opt/dockpilot/dockpilot-server
 Restart=always
 RestartSec=5

@@ -142,6 +142,11 @@ export interface InstallInfo {
   registration_token: string
   docker_command: string
   binary_command: string
+  agent_docker?: string
+  agent_binary?: string
+  server_docker?: string
+  server_binary?: string
+  uninstall?: string
 }
 
 export interface VersionInfo {

@@ -426,14 +426,27 @@ func (a *App) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 	serverURL := strings.TrimRight(a.cfg.PublicURL, "/")
-	docker := fmt.Sprintf("docker run -d --name dockpilot-agent --restart unless-stopped -e TZ=Asia/Shanghai -e DOCKPILOT_SERVER_URL=%s -e DOCKPILOT_REGISTRATION_TOKEN=%s -v /var/run/docker.sock:/var/run/docker.sock -v /opt:/opt ghcr.io/ry-zzcn/dockpilot-agent:latest", serverURL, a.cfg.AgentRegistrationToken)
-	systemd := fmt.Sprintf("DOCKPILOT_SERVER_URL=%s DOCKPILOT_REGISTRATION_TOKEN=%s ./dockpilot-agent", serverURL, a.cfg.AgentRegistrationToken)
+	installScript := "https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh"
+	agentDocker := fmt.Sprintf("curl -fsSL %s | bash -s -- install-agent-docker --server-url %s --registration-token %s", installScript, shellArg(serverURL), shellArg(a.cfg.AgentRegistrationToken))
+	agentBinary := fmt.Sprintf("curl -fsSL %s | bash -s -- install-agent-binary --server-url %s --registration-token %s", installScript, shellArg(serverURL), shellArg(a.cfg.AgentRegistrationToken))
+	serverDocker := fmt.Sprintf("curl -fsSL %s | bash -s -- install-server-docker --public-url %s", installScript, shellArg(serverURL))
+	serverBinary := fmt.Sprintf("curl -fsSL %s | bash -s -- install-server-binary --public-url %s", installScript, shellArg(serverURL))
+	uninstall := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall", installScript)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"server_url":         serverURL,
 		"registration_token": a.cfg.AgentRegistrationToken,
-		"docker_command":     docker,
-		"binary_command":     systemd,
+		"docker_command":     agentDocker,
+		"binary_command":     agentBinary,
+		"agent_docker":       agentDocker,
+		"agent_binary":       agentBinary,
+		"server_docker":      serverDocker,
+		"server_binary":      serverBinary,
+		"uninstall":          uninstall,
 	})
+}
+
+func shellArg(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func (a *App) serveStatic(w http.ResponseWriter, r *http.Request) {

@@ -17,7 +17,72 @@
   --amber: #ffd166;
   --rose: #ff6b8a;
   --violet: #a78bfa;
+  --primary-start: #35d8ff;
+  --primary-end: #22c55e;
+  --primary-text: #031014;
+  --code-bg: #03090c;
+  --code-text: #bfffe0;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme="graphite"] {
+  --bg: #0d1117;
+  --panel: rgba(19, 25, 34, 0.9);
+  --panel-strong: rgba(25, 32, 43, 0.96);
+  --line: rgba(157, 180, 205, 0.2);
+  --line-strong: rgba(157, 180, 205, 0.38);
+  --text: #eef4f8;
+  --muted: #9aa8b5;
+  --cyan: #8bd3ff;
+  --green: #74f0b0;
+  --amber: #f6c86f;
+  --rose: #ff7a90;
+  --violet: #b9a7ff;
+  --primary-start: #8bd3ff;
+  --primary-end: #74f0b0;
+  --primary-text: #081018;
+  --code-bg: #070a0f;
+  --code-text: #d5f3ff;
+}
+
+:root[data-theme="ember"] {
+  --bg: #11100d;
+  --panel: rgba(31, 27, 21, 0.9);
+  --panel-strong: rgba(39, 34, 25, 0.96);
+  --line: rgba(255, 196, 112, 0.22);
+  --line-strong: rgba(255, 196, 112, 0.4);
+  --text: #fff7ea;
+  --muted: #b8a995;
+  --cyan: #8bd3ff;
+  --green: #f6b44b;
+  --amber: #ffe082;
+  --rose: #ff7a90;
+  --violet: #c4b5fd;
+  --primary-start: #ffd166;
+  --primary-end: #34d399;
+  --primary-text: #171006;
+  --code-bg: #090705;
+  --code-text: #ffe6b0;
+}
+
+:root[data-theme="terminal"] {
+  --bg: #06100d;
+  --panel: rgba(8, 23, 18, 0.9);
+  --panel-strong: rgba(10, 31, 24, 0.96);
+  --line: rgba(116, 240, 176, 0.2);
+  --line-strong: rgba(116, 240, 176, 0.4);
+  --text: #eafff4;
+  --muted: #8fb8a4;
+  --cyan: #7dd3fc;
+  --green: #74f0b0;
+  --amber: #facc15;
+  --rose: #fb7185;
+  --violet: #a7f3d0;
+  --primary-start: #74f0b0;
+  --primary-end: #7dd3fc;
+  --primary-text: #02110a;
+  --code-bg: #020805;
+  --code-text: #9effc8;
 }
 
 * {
@@ -63,7 +128,7 @@ textarea:disabled {
   background:
     linear-gradient(135deg, rgba(98, 230, 255, 0.14), transparent 34%),
     linear-gradient(315deg, rgba(125, 255, 178, 0.1), transparent 30%),
-    #091116;
+    var(--bg);
 }
 
 .login-panel {
@@ -221,8 +286,8 @@ textarea {
 }
 
 .primary {
-  background: linear-gradient(135deg, #35d8ff, #22c55e);
-  color: #031014;
+  background: linear-gradient(135deg, var(--primary-start), var(--primary-end));
+  color: var(--primary-text);
   box-shadow: 0 12px 30px rgba(34, 197, 94, 0.14);
 }
 
@@ -296,6 +361,27 @@ textarea {
 .time-chip small {
   grid-column: 2;
   color: var(--muted);
+}
+
+.theme-select {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: rgba(12, 26, 34, 0.82);
+  color: var(--cyan);
+}
+
+.theme-select select {
+  width: 108px;
+  min-height: 34px;
+  border: 0;
+  padding: 5px 4px;
+  background: transparent;
+  color: var(--text);
 }
 
 .view-stack {
@@ -664,12 +750,28 @@ td {
   border: 1px solid rgba(125, 255, 178, 0.14);
   border-radius: 8px;
   padding: 14px;
-  background: #03090c;
-  color: #bfffe0;
+  background: var(--code-bg);
+  color: var(--code-text);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.command-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.command-item {
+  display: grid;
+  gap: 7px;
+}
+
+.command-item > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .command-box {
@@ -677,8 +779,8 @@ td {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
-  background: #03090c;
-  color: #bfffe0;
+  background: var(--code-bg);
+  color: var(--code-text);
   font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
@@ -772,6 +874,14 @@ td {
 
   .top-actions select,
   .time-chip {
+    width: 100%;
+  }
+
+  .theme-select {
+    width: 100%;
+  }
+
+  .theme-select select {
     width: 100%;
   }
 

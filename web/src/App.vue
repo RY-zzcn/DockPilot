@@ -70,6 +70,14 @@
             <span>{{ currentClock }}</span>
             <small>北京时间</small>
           </div>
+          <label class="theme-select" title="界面主题">
+            <Palette :size="16" />
+            <select v-model="themeName">
+              <option v-for="theme in themes" :key="theme.value" :value="theme.value">
+                {{ theme.label }}
+              </option>
+            </select>
+          </label>
           <select v-model="selectedNodeId" title="选择节点">
             <option value="">全部节点</option>
             <option v-for="node in nodes" :key="node.id" :value="node.id">
@@ -424,8 +432,28 @@
             <h2>Agent</h2>
             <Terminal :size="18" />
           </div>
-          <div class="command-box">{{ installInfo.docker_command }}</div>
-          <div class="command-box">{{ installInfo.binary_command }}</div>
+          <div class="command-stack">
+            <div class="command-item">
+              <span>Agent 二进制接入</span>
+              <div class="command-box">{{ installInfo.agent_binary || installInfo.binary_command }}</div>
+            </div>
+            <div class="command-item">
+              <span>Agent Docker 接入</span>
+              <div class="command-box">{{ installInfo.agent_docker || installInfo.docker_command }}</div>
+            </div>
+            <div class="command-item">
+              <span>Server Docker 部署</span>
+              <div class="command-box">{{ installInfo.server_docker || '-' }}</div>
+            </div>
+            <div class="command-item">
+              <span>Server 二进制部署</span>
+              <div class="command-box">{{ installInfo.server_binary || '-' }}</div>
+            </div>
+            <div class="command-item">
+              <span>卸载</span>
+              <div class="command-box">{{ installInfo.uninstall || '-' }}</div>
+            </div>
+          </div>
         </section>
 
         <section class="panel">
@@ -518,6 +546,7 @@ import {
   LogOut,
   MemoryStick,
   Network,
+  Palette,
   Plus,
   Play,
   RefreshCw,
@@ -548,10 +577,22 @@ import type {
 } from './types'
 
 type ViewName = 'dashboard' | 'nodes' | 'updates' | 'tasks' | 'settings'
+type ThemeName = 'aurora' | 'graphite' | 'ember' | 'terminal'
 
+const THEME_KEY = 'dockpilot.theme'
+const themes: { value: ThemeName; label: string }[] = [
+  { value: 'aurora', label: '极光' },
+  { value: 'graphite', label: '石墨' },
+  { value: 'ember', label: '日冕' },
+  { value: 'terminal', label: '终端' }
+]
+const savedTheme = localStorage.getItem(THEME_KEY) as ThemeName | null
 const token = ref(getToken())
 const user = ref<AuthClaims | null>(null)
 const activeView = ref<ViewName>('dashboard')
+const themeName = ref<ThemeName>(
+  themes.some((theme) => theme.value === savedTheme) ? (savedTheme as ThemeName) : 'aurora'
+)
 const busy = ref(false)
 const error = ref('')
 const selectedNodeId = ref('')
@@ -599,7 +640,12 @@ const installInfo = reactive<InstallInfo>({
   server_url: '',
   registration_token: '',
   docker_command: '',
-  binary_command: ''
+  binary_command: '',
+  agent_docker: '',
+  agent_binary: '',
+  server_docker: '',
+  server_binary: '',
+  uninstall: ''
 })
 
 const composeForm = reactive({
@@ -697,6 +743,15 @@ const PolicyEditor = defineComponent({
       ])
   }
 })
+
+watch(
+  themeName,
+  (value) => {
+    document.documentElement.dataset.theme = value
+    localStorage.setItem(THEME_KEY, value)
+  },
+  { immediate: true }
+)
 
 onMounted(() => {
   tickClock()
