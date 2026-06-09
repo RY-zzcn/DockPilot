@@ -1,5 +1,6 @@
 data/
 .npm-cache/
+.ssh/
 web/dist/
 web/node_modules/
 *.db
