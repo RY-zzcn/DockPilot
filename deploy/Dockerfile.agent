@@ -1,0 +1,14 @@
+FROM golang:1.23-bookworm AS build
+WORKDIR /src
+COPY go.mod ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/dockpilot-agent ./cmd/agent
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose tzdata
+WORKDIR /app
+COPY --from=build /out/dockpilot-agent /app/dockpilot-agent
+ENV DOCKPILOT_STATE_PATH=/data/agent.json
+VOLUME ["/data"]
+ENTRYPOINT ["/app/dockpilot-agent"]

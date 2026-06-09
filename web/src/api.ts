@@ -1,0 +1,101 @@
+import type {
+  AuthClaims,
+  ComposeProject,
+  DockerState,
+  InstallInfo,
+  Node,
+  Notification,
+  Overview,
+  Policy,
+  Task,
+  TaskLog,
+  User
+} from './types'
+
+const TOKEN_KEY = 'dockpilot.token'
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || ''
+}
+
+export function setToken(token: string) {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers)
+  headers.set('Content-Type', 'application/json')
+  const token = getToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  const response = await fetch(path, { ...options, headers })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(data.error || response.statusText)
+  }
+  return data as T
+}
+
+export const api = {
+  async login(username: string, password: string) {
+    return request<{ token: string; user: User }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    })
+  },
+  me: () => request<AuthClaims>('/api/auth/me'),
+  overview: () => request<Overview>('/api/overview'),
+  nodes: () => request<Node[]>('/api/nodes'),
+  node: (id: string) => request<{ node: Node; online: boolean; docker: DockerState }>(`/api/nodes/${id}`),
+  dockerState: (nodeId: string) => request<DockerState>(`/api/docker/state?node_id=${encodeURIComponent(nodeId)}`),
+  saveCompose: (body: {
+    node_id: string
+    id?: string
+    name: string
+    path: string
+    content: string
+    deploy_now: boolean
+  }) =>
+    request<ComposeProject>('/api/docker/compose', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
+  tasks: () => request<Task[]>('/api/tasks?limit=100'),
+  createTask: (body: {
+    node_id: string
+    kind: string
+    target_type?: string
+    target_id?: string
+    args?: Record<string, string>
+  }) =>
+    request<Task>('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
+  taskLogs: (id: string) => request<TaskLog[]>(`/api/tasks/${id}/logs`),
+  cancelTask: (id: string) => request<{ status: string }>(`/api/tasks/${id}/cancel`, { method: 'POST' }),
+  policies: () => request<Policy[]>('/api/policies'),
+  savePolicy: (policy: Policy) =>
+    request<Policy>('/api/policies', {
+      method: 'PUT',
+      body: JSON.stringify(policy)
+    }),
+  notifications: () => request<Notification[]>('/api/notifications'),
+  saveNotification: (notification: Notification) =>
+    request<Notification>('/api/notifications', {
+      method: 'PUT',
+      body: JSON.stringify(notification)
+    }),
+  users: () => request<User[]>('/api/users'),
+  createUser: (body: { username: string; password: string; role: string }) =>
+    request<User>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
+  installInfo: () => request<InstallInfo>('/api/settings/install')
+}

@@ -1,0 +1,45 @@
+services:
+  server:
+    image: ghcr.io/dockpilot/dockpilot-server:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+    container_name: dockpilot-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DOCKPILOT_PUBLIC_URL: ${DOCKPILOT_PUBLIC_URL:-http://127.0.0.1:8080}
+      DOCKPILOT_ADMIN_USER: ${DOCKPILOT_ADMIN_USER:-admin}
+      DOCKPILOT_ADMIN_PASSWORD: ${DOCKPILOT_ADMIN_PASSWORD:-admin}
+      DOCKPILOT_AUTH_SECRET: ${DOCKPILOT_AUTH_SECRET:-change-me-auth-secret}
+      DOCKPILOT_AGENT_REGISTRATION_TOKEN: ${DOCKPILOT_AGENT_REGISTRATION_TOKEN:-change-me-registration-token}
+    volumes:
+      - dockpilot-data:/data
+
+  local-agent:
+    image: ghcr.io/dockpilot/dockpilot-agent:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.agent
+    container_name: dockpilot-agent
+    restart: unless-stopped
+    profiles:
+      - agent
+    environment:
+      DOCKPILOT_SERVER_URL: ${DOCKPILOT_PUBLIC_URL:-http://server:8080}
+      DOCKPILOT_REGISTRATION_TOKEN: ${DOCKPILOT_AGENT_REGISTRATION_TOKEN:-change-me-registration-token}
+      DOCKPILOT_NODE_NAME: ${HOSTNAME:-local-vps}
+      DOCKPILOT_COMPOSE_DIRS: /opt,/srv,/var/www
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt:/opt
+      - /srv:/srv
+      - /var/www:/var/www
+      - dockpilot-agent-state:/data
+    depends_on:
+      - server
+
+volumes:
+  dockpilot-data:
+  dockpilot-agent-state:

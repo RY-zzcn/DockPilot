@@ -1,0 +1,9 @@
+data/
+.npm-cache/
+web/dist/
+web/node_modules/
+*.db
+*.db-shm
+*.db-wal
+.dockpilot-agent.json
+.env
