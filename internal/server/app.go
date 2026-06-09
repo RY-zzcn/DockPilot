@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -425,7 +426,7 @@ func (a *App) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
-	serverURL := strings.TrimRight(a.cfg.PublicURL, "/")
+	serverURL := a.publicURL(r)
 	installScript := "https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh"
 	agentDocker := fmt.Sprintf("curl -fsSL %s | bash -s -- install-agent-docker --server-url %s --registration-token %s", installScript, shellArg(serverURL), shellArg(a.cfg.AgentRegistrationToken))
 	agentBinary := fmt.Sprintf("curl -fsSL %s | bash -s -- install-agent-binary --server-url %s --registration-token %s", installScript, shellArg(serverURL), shellArg(a.cfg.AgentRegistrationToken))
@@ -447,6 +448,31 @@ func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 
 func shellArg(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func (a *App) publicURL(r *http.Request) string {
+	configured := strings.TrimRight(a.cfg.PublicURL, "/")
+	if !isLoopbackURL(configured) || r.Host == "" {
+		return configured
+	}
+	scheme := r.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		if r.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	return scheme + "://" + r.Host
+}
+
+func isLoopbackURL(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
 func (a *App) serveStatic(w http.ResponseWriter, r *http.Request) {
