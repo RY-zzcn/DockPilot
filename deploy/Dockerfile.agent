@@ -3,12 +3,18 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -mod=mod -o /out/dockpilot-agent ./cmd/agent
+ARG VERSION=0.1.0
+ARG COMMIT=dev
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 go build -mod=mod \
+    -ldflags="-s -w -X github.com/dockpilot/dockpilot/internal/version.Version=${VERSION} -X github.com/dockpilot/dockpilot/internal/version.Commit=${COMMIT} -X github.com/dockpilot/dockpilot/internal/version.BuildDate=${BUILD_DATE}" \
+    -o /out/dockpilot-agent ./cmd/agent
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose tzdata
 WORKDIR /app
 COPY --from=build /out/dockpilot-agent /app/dockpilot-agent
 ENV DOCKPILOT_STATE_PATH=/data/agent.json
+ENV TZ=Asia/Shanghai
 VOLUME ["/data"]
 ENTRYPOINT ["/app/dockpilot-agent"]

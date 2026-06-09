@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('admin','viewer')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
@@ -220,8 +220,8 @@ CREATE TABLE IF NOT EXISTS nodes (
   status TEXT NOT NULL DEFAULT 'offline',
   last_seen TEXT NOT NULL DEFAULT '',
   labels TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS node_metrics (
@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS node_metrics (
   network_rx INTEGER NOT NULL,
   network_tx INTEGER NOT NULL,
   container_count INTEGER NOT NULL,
-  recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+  recorded_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
 
@@ -248,7 +248,7 @@ CREATE TABLE IF NOT EXISTS containers (
   status TEXT NOT NULL,
   compose_project TEXT NOT NULL DEFAULT '',
   update_available INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   PRIMARY KEY(node_id, id),
   FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS images (
   tag TEXT NOT NULL,
   size TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   PRIMARY KEY(node_id, id),
   FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
@@ -273,8 +273,8 @@ CREATE TABLE IF NOT EXISTS compose_projects (
   managed INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL DEFAULT '',
   version INTEGER NOT NULL DEFAULT 1,
-  last_seen TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   PRIMARY KEY(node_id, id),
   FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
 );
@@ -284,7 +284,7 @@ CREATE TABLE IF NOT EXISTS compose_revisions (
   project_id TEXT NOT NULL,
   node_id TEXT NOT NULL,
   content TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   created_by TEXT NOT NULL
 );
 
@@ -299,7 +299,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   policy_id TEXT NOT NULL DEFAULT '',
   payload TEXT NOT NULL DEFAULT '{}',
   result TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   started_at TEXT NOT NULL DEFAULT '',
   finished_at TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
@@ -309,7 +309,7 @@ CREATE TABLE IF NOT EXISTS task_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL,
   line TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
@@ -321,7 +321,7 @@ CREATE TABLE IF NOT EXISTS policies (
   schedule TEXT NOT NULL DEFAULT '',
   exclude_patterns TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   UNIQUE(scope, scope_id)
 );
 
@@ -331,8 +331,8 @@ CREATE TABLE IF NOT EXISTS notifications (
   channel TEXT NOT NULL,
   config TEXT NOT NULL DEFAULT '{}',
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -341,7 +341,7 @@ CREATE TABLE IF NOT EXISTS events (
   type TEXT NOT NULL,
   message TEXT NOT NULL,
   payload TEXT NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_metrics_node_recorded ON node_metrics(node_id, recorded_at DESC);
@@ -364,7 +364,7 @@ func (s *Store) EnsureAdmin(username, password string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`INSERT INTO users(username, password_hash, role) VALUES(?,?,?)`, username, hash, RoleAdmin)
+	_, err = s.db.Exec(`INSERT INTO users(username, password_hash, role, created_at) VALUES(?,?,?,datetime('now','localtime'))`, username, hash, RoleAdmin)
 	return err
 }
 
@@ -376,7 +376,7 @@ func (s *Store) CreateUser(username, password, role string) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	res, err := s.db.Exec(`INSERT INTO users(username, password_hash, role) VALUES(?,?,?)`, username, hash, role)
+	res, err := s.db.Exec(`INSERT INTO users(username, password_hash, role, created_at) VALUES(?,?,?,datetime('now','localtime'))`, username, hash, role)
 	if err != nil {
 		return User{}, err
 	}
@@ -431,8 +431,8 @@ func (s *Store) UpsertNodeFromHello(hello protocol.HelloPayload, fallbackID stri
 	}
 	labels, _ := json.Marshal(hello.Labels)
 	res, err := s.db.Exec(`
-INSERT INTO nodes(id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, updated_at)
-VALUES(?,?,?,?,?,?,?,?, 'online', datetime('now'), ?, datetime('now'))
+INSERT INTO nodes(id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at)
+VALUES(?,?,?,?,?,?,?,?, 'online', datetime('now','localtime'), ?, datetime('now','localtime'), datetime('now','localtime'))
 ON CONFLICT(id) DO UPDATE SET
   name = excluded.name,
   version = excluded.version,
@@ -441,9 +441,9 @@ ON CONFLICT(id) DO UPDATE SET
   docker_version = excluded.docker_version,
   compose_version = excluded.compose_version,
   status = 'online',
-  last_seen = datetime('now'),
+  last_seen = datetime('now','localtime'),
   labels = excluded.labels,
-  updated_at = datetime('now')
+  updated_at = datetime('now','localtime')
 `, nodeID, nonEmpty(hello.Name, nodeID), token, hello.Version, hello.OS, hello.Arch, hello.DockerVersion, hello.ComposeVersion, string(labels))
 	if err != nil {
 		return Node{}, false, err
@@ -487,12 +487,12 @@ func (s *Store) ListNodes() ([]Node, error) {
 }
 
 func (s *Store) MarkNodeSeen(nodeID, status string) error {
-	_, err := s.db.Exec(`UPDATE nodes SET status = ?, last_seen = datetime('now'), updated_at = datetime('now') WHERE id = ?`, status, nodeID)
+	_, err := s.db.Exec(`UPDATE nodes SET status = ?, last_seen = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE id = ?`, status, nodeID)
 	return err
 }
 
 func (s *Store) MarkStaleNodesOffline(timeout time.Duration) ([]Node, error) {
-	cutoff := time.Now().Add(-timeout).UTC().Format("2006-01-02 15:04:05")
+	cutoff := time.Now().In(time.Local).Add(-timeout).Format("2006-01-02 15:04:05")
 	rows, err := s.db.Query(`SELECT id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at FROM nodes WHERE status = 'online' AND last_seen < ?`, cutoff)
 	if err != nil {
 		return nil, err
@@ -509,14 +509,14 @@ func (s *Store) MarkStaleNodesOffline(timeout time.Duration) ([]Node, error) {
 	if rows.Err() != nil {
 		return nil, rows.Err()
 	}
-	_, err = s.db.Exec(`UPDATE nodes SET status = 'offline', updated_at = datetime('now') WHERE status = 'online' AND last_seen < ?`, cutoff)
+	_, err = s.db.Exec(`UPDATE nodes SET status = 'offline', updated_at = datetime('now','localtime') WHERE status = 'online' AND last_seen < ?`, cutoff)
 	return stale, err
 }
 
 func (s *Store) InsertMetrics(nodeID string, metric protocol.MetricsPayload) error {
 	_, err := s.db.Exec(`
-INSERT INTO node_metrics(node_id, cpu_percent, memory_used, memory_total, disk_used, disk_total, network_rx, network_tx, container_count)
-VALUES(?,?,?,?,?,?,?,?,?)`, nodeID, metric.CPUPercent, metric.MemoryUsed, metric.MemoryTotal, metric.DiskUsed, metric.DiskTotal, metric.NetworkRx, metric.NetworkTx, metric.ContainerCount)
+INSERT INTO node_metrics(node_id, cpu_percent, memory_used, memory_total, disk_used, disk_total, network_rx, network_tx, container_count, recorded_at)
+VALUES(?,?,?,?,?,?,?,?,?,datetime('now','localtime'))`, nodeID, metric.CPUPercent, metric.MemoryUsed, metric.MemoryTotal, metric.DiskUsed, metric.DiskTotal, metric.NetworkRx, metric.NetworkTx, metric.ContainerCount)
 	return err
 }
 
@@ -535,7 +535,7 @@ func (s *Store) ReplaceDockerSnapshot(nodeID string, snapshot protocol.DockerSna
 	for _, container := range snapshot.Containers {
 		_, err := tx.Exec(`
 INSERT INTO containers(id, node_id, name, image, state, status, compose_project, updated_at)
-VALUES(?,?,?,?,?,?,?,datetime('now'))`,
+VALUES(?,?,?,?,?,?,?,datetime('now','localtime'))`,
 			container.ID, nodeID, container.Name, container.Image, container.State, container.Status, container.ComposeProject)
 		if err != nil {
 			return err
@@ -549,7 +549,7 @@ VALUES(?,?,?,?,?,?,?,datetime('now'))`,
 	for _, image := range snapshot.Images {
 		_, err := tx.Exec(`
 INSERT INTO images(id, node_id, repository, tag, size, created_at, updated_at)
-VALUES(?,?,?,?,?,?,datetime('now'))`,
+VALUES(?,?,?,?,?,?,datetime('now','localtime'))`,
 			image.ID, nodeID, image.Repository, image.Tag, image.Size, image.CreatedAt)
 		if err != nil {
 			return err
@@ -558,14 +558,14 @@ VALUES(?,?,?,?,?,?,datetime('now'))`,
 	for _, project := range snapshot.ComposeProjects {
 		_, err := tx.Exec(`
 INSERT INTO compose_projects(id, node_id, name, path, managed, content, last_seen, updated_at)
-VALUES(?,?,?,?,?,?,datetime('now'),datetime('now'))
+VALUES(?,?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
 ON CONFLICT(node_id, id) DO UPDATE SET
   name = excluded.name,
   path = excluded.path,
   content = CASE WHEN compose_projects.managed = 1 THEN compose_projects.content ELSE excluded.content END,
   managed = CASE WHEN compose_projects.managed = 1 THEN 1 ELSE excluded.managed END,
-  last_seen = datetime('now'),
-  updated_at = datetime('now')`,
+  last_seen = datetime('now','localtime'),
+  updated_at = datetime('now','localtime')`,
 			project.ID, nodeID, project.Name, project.Path, boolInt(project.Managed), project.Content)
 		if err != nil {
 			return err
@@ -610,20 +610,20 @@ func (s *Store) SaveComposeProject(nodeID, projectID, name, path, content, usern
 	var oldContent string
 	_ = tx.QueryRow(`SELECT content FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).Scan(&oldContent)
 	if oldContent != "" {
-		if _, err := tx.Exec(`INSERT INTO compose_revisions(project_id, node_id, content, created_by) VALUES(?,?,?,?)`, projectID, nodeID, oldContent, username); err != nil {
+		if _, err := tx.Exec(`INSERT INTO compose_revisions(project_id, node_id, content, created_at, created_by) VALUES(?,?,?,datetime('now','localtime'),?)`, projectID, nodeID, oldContent, username); err != nil {
 			return ComposeProject{}, err
 		}
 	}
 	_, err = tx.Exec(`
 INSERT INTO compose_projects(id, node_id, name, path, managed, content, version, last_seen, updated_at)
-VALUES(?,?,?,?,1,?,1,datetime('now'),datetime('now'))
+VALUES(?,?,?,?,1,?,1,datetime('now','localtime'),datetime('now','localtime'))
 ON CONFLICT(node_id, id) DO UPDATE SET
   name = excluded.name,
   path = excluded.path,
   managed = 1,
   content = excluded.content,
   version = compose_projects.version + 1,
-  updated_at = datetime('now')`,
+  updated_at = datetime('now','localtime')`,
 		projectID, nodeID, name, path, content)
 	if err != nil {
 		return ComposeProject{}, err
@@ -652,8 +652,8 @@ func (s *Store) CreateTask(task Task) (Task, error) {
 		task.Payload = "{}"
 	}
 	_, err := s.db.Exec(`
-INSERT INTO tasks(id, node_id, kind, target_type, target_id, status, requested_by, policy_id, payload)
-VALUES(?,?,?,?,?,?,?,?,?)`,
+INSERT INTO tasks(id, node_id, kind, target_type, target_id, status, requested_by, policy_id, payload, created_at)
+VALUES(?,?,?,?,?,?,?,?,?,datetime('now','localtime'))`,
 		task.ID, task.NodeID, task.Kind, task.TargetType, task.TargetID, task.Status, task.RequestedBy, task.PolicyID, task.Payload)
 	if err != nil {
 		return Task{}, err
@@ -706,17 +706,17 @@ func (s *Store) PendingTasksForNode(nodeID string) ([]Task, error) {
 }
 
 func (s *Store) MarkTaskRunning(id string) error {
-	_, err := s.db.Exec(`UPDATE tasks SET status = ?, started_at = CASE WHEN started_at = '' THEN datetime('now') ELSE started_at END WHERE id = ?`, TaskRunning, id)
+	_, err := s.db.Exec(`UPDATE tasks SET status = ?, started_at = CASE WHEN started_at = '' THEN datetime('now','localtime') ELSE started_at END WHERE id = ?`, TaskRunning, id)
 	return err
 }
 
 func (s *Store) FinishTask(id, status, result string) error {
-	_, err := s.db.Exec(`UPDATE tasks SET status = ?, result = ?, finished_at = datetime('now') WHERE id = ?`, status, result, id)
+	_, err := s.db.Exec(`UPDATE tasks SET status = ?, result = ?, finished_at = datetime('now','localtime') WHERE id = ?`, status, result, id)
 	return err
 }
 
 func (s *Store) AddTaskLog(taskID, line string) error {
-	_, err := s.db.Exec(`INSERT INTO task_logs(task_id, line) VALUES(?,?)`, taskID, line)
+	_, err := s.db.Exec(`INSERT INTO task_logs(task_id, line, created_at) VALUES(?,?,datetime('now','localtime'))`, taskID, line)
 	return err
 }
 
@@ -770,13 +770,13 @@ func (s *Store) UpsertPolicy(policy Policy) (Policy, error) {
 	}
 	_, err := s.db.Exec(`
 INSERT INTO policies(id, scope, scope_id, mode, schedule, exclude_patterns, enabled, updated_at)
-VALUES(?,?,?,?,?,?,?,datetime('now'))
+VALUES(?,?,?,?,?,?,?,datetime('now','localtime'))
 ON CONFLICT(scope, scope_id) DO UPDATE SET
   mode = excluded.mode,
   schedule = excluded.schedule,
   exclude_patterns = excluded.exclude_patterns,
   enabled = excluded.enabled,
-  updated_at = datetime('now')`,
+  updated_at = datetime('now','localtime')`,
 		policy.ID, policy.Scope, policy.ScopeID, policy.Mode, policy.Schedule, policy.ExcludePatterns, boolInt(policy.Enabled))
 	if err != nil {
 		return Policy{}, err
@@ -849,14 +849,14 @@ func (s *Store) UpsertNotification(notification Notification) (Notification, err
 		notification.Config = "{}"
 	}
 	_, err := s.db.Exec(`
-INSERT INTO notifications(id, name, channel, config, enabled, updated_at)
-VALUES(?,?,?,?,?,datetime('now'))
+INSERT INTO notifications(id, name, channel, config, enabled, created_at, updated_at)
+VALUES(?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
 ON CONFLICT(id) DO UPDATE SET
   name = excluded.name,
   channel = excluded.channel,
   config = excluded.config,
   enabled = excluded.enabled,
-  updated_at = datetime('now')`,
+  updated_at = datetime('now','localtime')`,
 		notification.ID, notification.Name, notification.Channel, notification.Config, boolInt(notification.Enabled))
 	if err != nil {
 		return Notification{}, err
@@ -886,7 +886,7 @@ func (s *Store) EnabledNotifications() ([]Notification, error) {
 
 func (s *Store) AddEvent(severity, eventType, message string, payload any) error {
 	raw, _ := json.Marshal(payload)
-	_, err := s.db.Exec(`INSERT INTO events(severity, type, message, payload) VALUES(?,?,?,?)`, severity, eventType, message, string(raw))
+	_, err := s.db.Exec(`INSERT INTO events(severity, type, message, payload, created_at) VALUES(?,?,?,?,datetime('now','localtime'))`, severity, eventType, message, string(raw))
 	return err
 }
 

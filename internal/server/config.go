@@ -13,6 +13,7 @@ type Config struct {
 	DatabasePath           string
 	WebDist                string
 	PublicURL              string
+	TimeZone               string
 	AgentRegistrationToken string
 	AuthSecret             string
 	AdminUsername          string
@@ -28,6 +29,7 @@ func LoadConfig() Config {
 		DatabasePath:           env("DOCKPILOT_DB", filepath.Join(dataDir, "dockpilot.db")),
 		WebDist:                env("DOCKPILOT_WEB_DIST", "web/dist"),
 		PublicURL:              env("DOCKPILOT_PUBLIC_URL", "http://127.0.0.1:8080"),
+		TimeZone:               env("DOCKPILOT_TIMEZONE", "Asia/Shanghai"),
 		AgentRegistrationToken: env("DOCKPILOT_AGENT_REGISTRATION_TOKEN", "change-me-registration-token"),
 		AuthSecret:             env("DOCKPILOT_AUTH_SECRET", "change-me-auth-secret"),
 		AdminUsername:          env("DOCKPILOT_ADMIN_USER", "admin"),

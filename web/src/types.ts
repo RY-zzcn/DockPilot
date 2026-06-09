@@ -143,3 +143,11 @@ export interface InstallInfo {
   docker_command: string
   binary_command: string
 }
+
+export interface VersionInfo {
+  version: string
+  commit: string
+  build_date: string
+  time_zone: string
+  server_time: string
+}

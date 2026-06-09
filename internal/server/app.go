@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dockpilot/dockpilot/internal/version"
 )
 
 type App struct {
@@ -25,6 +27,10 @@ type App struct {
 }
 
 func NewApp(cfg Config) (*App, error) {
+	if loc, err := time.LoadLocation(cfg.TimeZone); err == nil {
+		time.Local = loc
+		_ = os.Setenv("TZ", cfg.TimeZone)
+	}
 	store, err := OpenStore(cfg.DatabasePath)
 	if err != nil {
 		return nil, err
@@ -118,6 +124,8 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		a.handleRefresh(w, r)
 	case path == "/overview" && r.Method == http.MethodGet:
 		a.handleOverview(w, r)
+	case path == "/version" && r.Method == http.MethodGet:
+		a.handleVersion(w, r)
 	case path == "/nodes" && r.Method == http.MethodGet:
 		a.handleListNodes(w, r)
 	case strings.HasPrefix(path, "/nodes/") && r.Method == http.MethodGet:
@@ -180,6 +188,17 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, overview)
+}
+
+func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
+	info := version.Current()
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version":     info.Version,
+		"commit":      info.Commit,
+		"build_date":  info.BuildDate,
+		"time_zone":   a.cfg.TimeZone,
+		"server_time": time.Now().In(time.Local).Format(time.RFC3339),
+	})
 }
 
 func (a *App) handleListNodes(w http.ResponseWriter, r *http.Request) {
@@ -407,7 +426,7 @@ func (a *App) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 	serverURL := strings.TrimRight(a.cfg.PublicURL, "/")
-	docker := fmt.Sprintf("docker run -d --name dockpilot-agent --restart unless-stopped -e DOCKPILOT_SERVER_URL=%s -e DOCKPILOT_REGISTRATION_TOKEN=%s -v /var/run/docker.sock:/var/run/docker.sock -v /opt:/opt ghcr.io/dockpilot/dockpilot-agent:latest", serverURL, a.cfg.AgentRegistrationToken)
+	docker := fmt.Sprintf("docker run -d --name dockpilot-agent --restart unless-stopped -e TZ=Asia/Shanghai -e DOCKPILOT_SERVER_URL=%s -e DOCKPILOT_REGISTRATION_TOKEN=%s -v /var/run/docker.sock:/var/run/docker.sock -v /opt:/opt ghcr.io/ry-zzcn/dockpilot-agent:latest", serverURL, a.cfg.AgentRegistrationToken)
 	systemd := fmt.Sprintf("DOCKPILOT_SERVER_URL=%s DOCKPILOT_REGISTRATION_TOKEN=%s ./dockpilot-agent", serverURL, a.cfg.AgentRegistrationToken)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"server_url":         serverURL,

@@ -27,7 +27,7 @@
         <div class="brand-mark">D</div>
         <div>
           <strong>DockPilot</strong>
-          <span>{{ user?.username }}</span>
+          <span>{{ user?.username }} · v{{ versionInfo.version }}</span>
         </div>
       </div>
       <nav class="nav-list">
@@ -65,6 +65,11 @@
           <h1>{{ selectedNode?.name || '多节点 Docker 管理' }}</h1>
         </div>
         <div class="top-actions">
+          <div class="time-chip">
+            <Clock3 :size="16" />
+            <span>{{ currentClock }}</span>
+            <small>北京时间</small>
+          </div>
           <select v-model="selectedNodeId" title="选择节点">
             <option value="">全部节点</option>
             <option v-for="node in nodes" :key="node.id" :value="node.id">
@@ -96,6 +101,44 @@
           <article class="metric-card danger">
             <span>失败任务</span>
             <strong>{{ overview.failed_tasks }}</strong>
+          </article>
+        </div>
+
+        <div class="telemetry-grid">
+          <article class="telemetry-card">
+            <div>
+              <Cpu :size="18" />
+              <span>CPU</span>
+            </div>
+            <strong>{{ formatPercent(overview.last_metric.cpu_percent) }}</strong>
+            <div class="meter"><span :style="{ width: clampPercent(overview.last_metric.cpu_percent) + '%' }"></span></div>
+          </article>
+          <article class="telemetry-card">
+            <div>
+              <MemoryStick :size="18" />
+              <span>内存</span>
+            </div>
+            <strong>{{ formatPercent(memoryPercent) }}</strong>
+            <small>{{ formatBytes(overview.last_metric.memory_used) }} / {{ formatBytes(overview.last_metric.memory_total) }}</small>
+            <div class="meter"><span :style="{ width: clampPercent(memoryPercent) + '%' }"></span></div>
+          </article>
+          <article class="telemetry-card">
+            <div>
+              <HardDrive :size="18" />
+              <span>磁盘</span>
+            </div>
+            <strong>{{ formatPercent(diskPercent) }}</strong>
+            <small>{{ formatBytes(overview.last_metric.disk_used) }} / {{ formatBytes(overview.last_metric.disk_total) }}</small>
+            <div class="meter"><span :style="{ width: clampPercent(diskPercent) + '%' }"></span></div>
+          </article>
+          <article class="telemetry-card">
+            <div>
+              <Network :size="18" />
+              <span>网络</span>
+            </div>
+            <strong>{{ formatBytes(overview.last_metric.network_rx + overview.last_metric.network_tx) }}</strong>
+            <small>RX {{ formatBytes(overview.last_metric.network_rx) }} / TX {{ formatBytes(overview.last_metric.network_tx) }}</small>
+            <div class="meter accent"><span :style="{ width: '64%' }"></span></div>
           </article>
         </div>
 
@@ -359,6 +402,25 @@
       <section v-if="activeView === 'settings'" class="view-stack">
         <section class="panel">
           <div class="panel-head">
+            <h2>版本与发布</h2>
+            <Shield :size="18" />
+          </div>
+          <div class="fact-grid">
+            <span>Server</span>
+            <strong>v{{ versionInfo.version }}</strong>
+            <span>Commit</span>
+            <strong>{{ shortCommit }}</strong>
+            <span>构建时间</span>
+            <strong>{{ versionInfo.build_date || '-' }}</strong>
+            <span>服务时间</span>
+            <strong>{{ versionInfo.server_time || '-' }}</strong>
+            <span>时区</span>
+            <strong>{{ versionInfo.time_zone || 'Asia/Shanghai' }}</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
             <h2>Agent</h2>
             <Terminal :size="18" />
           </div>
@@ -442,15 +504,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   Bell,
   Box,
   ClipboardList,
+  Clock3,
+  Cpu,
   FileCode2,
+  HardDrive,
   LayoutDashboard,
   LogIn,
   LogOut,
+  MemoryStick,
+  Network,
   Plus,
   Play,
   RefreshCw,
@@ -476,7 +543,8 @@ import type {
   Policy,
   Task,
   TaskLog,
-  User
+  User,
+  VersionInfo
 } from './types'
 
 type ViewName = 'dashboard' | 'nodes' | 'updates' | 'tasks' | 'settings'
@@ -489,6 +557,9 @@ const error = ref('')
 const selectedNodeId = ref('')
 const selectedTask = ref<Task | null>(null)
 const taskLogs = ref<TaskLog[]>([])
+const currentClock = ref('')
+let clockTimer: number | undefined
+let refreshTimer: number | undefined
 
 const loginForm = reactive({ username: 'admin', password: 'admin' })
 const overview = reactive<Overview>({
@@ -517,6 +588,13 @@ const tasks = ref<Task[]>([])
 const policies = ref<Policy[]>([])
 const notifications = ref<Notification[]>([])
 const users = ref<User[]>([])
+const versionInfo = reactive<VersionInfo>({
+  version: '0.1.0',
+  commit: 'dev',
+  build_date: 'unknown',
+  time_zone: 'Asia/Shanghai',
+  server_time: ''
+})
 const installInfo = reactive<InstallInfo>({
   server_url: '',
   registration_token: '',
@@ -542,6 +620,9 @@ const policyDrafts = reactive<Record<string, Policy>>({})
 
 const isAdmin = computed(() => user.value?.role === 'admin')
 const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value))
+const memoryPercent = computed(() => percent(overview.last_metric.memory_used, overview.last_metric.memory_total))
+const diskPercent = computed(() => percent(overview.last_metric.disk_used, overview.last_metric.disk_total))
+const shortCommit = computed(() => (versionInfo.commit && versionInfo.commit !== 'dev' ? versionInfo.commit.slice(0, 12) : versionInfo.commit || '-'))
 const viewTitle = computed(() => {
   const titles: Record<ViewName, string> = {
     dashboard: '总览',
@@ -617,7 +698,20 @@ const PolicyEditor = defineComponent({
   }
 })
 
-onMounted(bootstrap)
+onMounted(() => {
+  tickClock()
+  clockTimer = window.setInterval(tickClock, 1000)
+  bootstrap()
+  refreshTimer = window.setInterval(() => {
+    if (token.value) {
+      refreshAll()
+    }
+  }, 30000)
+})
+onUnmounted(() => {
+  if (clockTimer) window.clearInterval(clockTimer)
+  if (refreshTimer) window.clearInterval(refreshTimer)
+})
 watch(selectedNodeId, async (nodeId) => {
   if (nodeId) {
     await loadDocker(nodeId)
@@ -638,6 +732,18 @@ async function bootstrap() {
   } catch {
     logout()
   }
+}
+
+function tickClock() {
+  currentClock.value = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(new Date())
 }
 
 async function login() {
@@ -665,18 +771,20 @@ function logout() {
 async function refreshAll() {
   error.value = ''
   try {
-    const [overviewData, nodesData, tasksData, policiesData, notificationsData] = await Promise.all([
+    const [overviewData, nodesData, tasksData, policiesData, notificationsData, versionData] = await Promise.all([
       api.overview(),
       api.nodes(),
       api.tasks(),
       api.policies(),
-      api.notifications()
+      api.notifications(),
+      api.version()
     ])
     Object.assign(overview, overviewData)
     nodes.value = nodesData
     tasks.value = tasksData
     policies.value = policiesData
     notifications.value = notificationsData
+    Object.assign(versionInfo, versionData)
     syncPolicyDrafts()
     if (!selectedNodeId.value && nodes.value.length > 0) {
       selectedNodeId.value = nodes.value[0].id
@@ -821,5 +929,31 @@ async function createUser() {
   userForm.username = ''
   userForm.password = ''
   users.value = await api.users()
+}
+
+function percent(used: number, total: number) {
+  if (!total) return 0
+  return (used / total) * 100
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, value))
+}
+
+function formatPercent(value: number) {
+  return `${clampPercent(value).toFixed(1)}%`
+}
+
+function formatBytes(value: number) {
+  if (!value) return '0 B'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let size = value
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`
 }
 </script>

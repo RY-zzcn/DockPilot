@@ -1,6 +1,6 @@
 services:
   server:
-    image: ghcr.io/dockpilot/dockpilot-server:latest
+    image: ghcr.io/ry-zzcn/dockpilot-server:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.server
@@ -9,6 +9,8 @@ services:
     ports:
       - "8080:8080"
     environment:
+      TZ: Asia/Shanghai
+      DOCKPILOT_TIMEZONE: ${DOCKPILOT_TIMEZONE:-Asia/Shanghai}
       DOCKPILOT_PUBLIC_URL: ${DOCKPILOT_PUBLIC_URL:-http://127.0.0.1:8080}
       DOCKPILOT_ADMIN_USER: ${DOCKPILOT_ADMIN_USER:-admin}
       DOCKPILOT_ADMIN_PASSWORD: ${DOCKPILOT_ADMIN_PASSWORD:-admin}
@@ -18,7 +20,7 @@ services:
       - dockpilot-data:/data
 
   local-agent:
-    image: ghcr.io/dockpilot/dockpilot-agent:latest
+    image: ghcr.io/ry-zzcn/dockpilot-agent:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile.agent
@@ -27,6 +29,7 @@ services:
     profiles:
       - agent
     environment:
+      TZ: Asia/Shanghai
       DOCKPILOT_SERVER_URL: ${DOCKPILOT_PUBLIC_URL:-http://server:8080}
       DOCKPILOT_REGISTRATION_TOKEN: ${DOCKPILOT_AGENT_REGISTRATION_TOKEN:-change-me-registration-token}
       DOCKPILOT_NODE_NAME: ${HOSTNAME:-local-vps}

@@ -9,7 +9,8 @@ import type {
   Policy,
   Task,
   TaskLog,
-  User
+  User,
+  VersionInfo
 } from './types'
 
 const TOKEN_KEY = 'dockpilot.token'
@@ -53,6 +54,7 @@ export const api = {
     })
   },
   me: () => request<AuthClaims>('/api/auth/me'),
+  version: () => request<VersionInfo>('/api/version'),
   overview: () => request<Overview>('/api/overview'),
   nodes: async () => asArray(await request<Node[] | null>('/api/nodes')),
   node: (id: string) => request<{ node: Node; online: boolean; docker: DockerState }>(`/api/nodes/${id}`),

@@ -39,6 +39,13 @@ go run ./cmd/agent \
 
 默认登录账号是 `admin` / `admin`。生产环境必须设置 `DOCKPILOT_ADMIN_PASSWORD`、`DOCKPILOT_AUTH_SECRET` 和 `DOCKPILOT_AGENT_REGISTRATION_TOKEN`。
 
+默认时区为北京时间 `Asia/Shanghai`。Server 会按该时区写入节点心跳、指标、任务、通知和审计时间；Docker / systemd 部署模板也会设置 `TZ=Asia/Shanghai`。如需覆盖，可设置：
+
+```bash
+DOCKPILOT_TIMEZONE=Asia/Shanghai
+TZ=Asia/Shanghai
+```
+
 ## Docker 部署
 
 ```bash
@@ -56,7 +63,14 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
   -v /opt:/opt \
   -v /srv:/srv \
   -v /var/www:/var/www \
-  ghcr.io/dockpilot/dockpilot-agent:latest
+  ghcr.io/ry-zzcn/dockpilot-agent:latest
+```
+
+可直接使用 GitHub Packages 镜像：
+
+```bash
+docker pull ghcr.io/ry-zzcn/dockpilot-server:latest
+docker pull ghcr.io/ry-zzcn/dockpilot-agent:latest
 ```
 
 ## 更新策略
@@ -78,12 +92,30 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
 ## API 概览
 
 - `/api/auth/*`：登录、刷新、当前用户。
+- `/api/version`：Server 版本、commit、构建时间、服务时区和当前服务时间。
 - `/api/nodes/*`：节点列表和节点详情。
 - `/api/docker/*`：Docker 状态、Compose 保存。
 - `/api/tasks/*`：任务创建、状态、日志、取消。
 - `/api/policies/*`：全局、节点、Compose、容器策略。
 - `/api/notifications/*`：Telegram、Webhook、Email 通知配置。
 - `/api/agent/ws`：Agent WebSocket 通道。
+
+## 版本发布
+
+推送 `v*` 标签会触发 GitHub Actions 发布流程：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+发布流程会生成：
+
+- GitHub Release 二进制包：`dockpilot_<version>_linux_amd64.tar.gz`、`dockpilot_<version>_linux_arm64.tar.gz`。
+- GitHub Packages 镜像：`ghcr.io/ry-zzcn/dockpilot-server:<version>`、`ghcr.io/ry-zzcn/dockpilot-agent:<version>`。
+- 同步推送 `latest`、`v<version>` 和 `<version>` 镜像标签。
+
+二进制包内包含 `dockpilot-server`、`dockpilot-agent`、`web/dist`、Docker Compose 示例和 systemd 服务模板。构建时会注入版本号、Git commit 和构建时间，可在面板设置页或 `/api/version` 查看。
 
 ## 安全提示
 

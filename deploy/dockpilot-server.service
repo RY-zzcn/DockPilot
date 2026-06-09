@@ -13,6 +13,8 @@ Environment=DOCKPILOT_DATA_DIR=/var/lib/dockpilot
 Environment=DOCKPILOT_DB=/var/lib/dockpilot/dockpilot.db
 Environment=DOCKPILOT_WEB_DIST=/opt/dockpilot/web/dist
 Environment=DOCKPILOT_PUBLIC_URL=http://127.0.0.1:8080
+Environment=DOCKPILOT_TIMEZONE=Asia/Shanghai
+Environment=TZ=Asia/Shanghai
 Environment=DOCKPILOT_ADMIN_USER=admin
 Environment=DOCKPILOT_ADMIN_PASSWORD=admin
 Environment=DOCKPILOT_AUTH_SECRET=change-me-auth-secret

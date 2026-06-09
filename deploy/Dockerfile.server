@@ -10,7 +10,12 @@ COPY go.mod ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -mod=mod -o /out/dockpilot-server ./cmd/server
+ARG VERSION=0.1.0
+ARG COMMIT=dev
+ARG BUILD_DATE=unknown
+RUN CGO_ENABLED=0 go build -mod=mod \
+    -ldflags="-s -w -X github.com/dockpilot/dockpilot/internal/version.Version=${VERSION} -X github.com/dockpilot/dockpilot/internal/version.Commit=${COMMIT} -X github.com/dockpilot/dockpilot/internal/version.BuildDate=${BUILD_DATE}" \
+    -o /out/dockpilot-server ./cmd/server
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata
@@ -21,6 +26,8 @@ ENV DOCKPILOT_ADDR=:8080
 ENV DOCKPILOT_DATA_DIR=/data
 ENV DOCKPILOT_DB=/data/dockpilot.db
 ENV DOCKPILOT_WEB_DIST=/app/web/dist
+ENV DOCKPILOT_TIMEZONE=Asia/Shanghai
+ENV TZ=Asia/Shanghai
 EXPOSE 8080
 VOLUME ["/data"]
 ENTRYPOINT ["/app/dockpilot-server"]
