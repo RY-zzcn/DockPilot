@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/dockpilot-agent ./cmd/agent
+RUN CGO_ENABLED=0 go build -mod=mod -o /out/dockpilot-agent ./cmd/agent
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose tzdata

@@ -10,7 +10,7 @@ COPY go.mod ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -o /out/dockpilot-server ./cmd/server
+RUN CGO_ENABLED=0 go build -mod=mod -o /out/dockpilot-server ./cmd/server
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata

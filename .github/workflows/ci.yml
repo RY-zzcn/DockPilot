@@ -22,11 +22,11 @@ jobs:
         with:
           go-version: '1.23.x'
 
-      - name: Download Go modules
-        run: go mod download
+      - name: Prepare Go modules
+        run: go mod tidy
 
       - name: Go tests
-        run: go test ./...
+        run: go test -mod=mod ./...
 
       - name: Set up Node
         uses: actions/setup-node@v4
