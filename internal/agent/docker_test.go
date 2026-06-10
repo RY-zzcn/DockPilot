@@ -56,6 +56,26 @@ func TestComposeFilePathAcceptsDirectory(t *testing.T) {
 	}
 }
 
+func TestParseComposeImagesIgnoresWarnings(t *testing.T) {
+	out := `time="2026-06-10T22:49:05+08:00" level=warning msg="/opt/app/docker-compose.yml: the attribute version is obsolete"
+nginx:stable
+ghcr.io/example/api:latest
+level=warning
+nginx:stable
+redis
+`
+	images := parseComposeImages(out)
+	want := []string{"ghcr.io/example/api:latest", "nginx:stable", "redis"}
+	if len(images) != len(want) {
+		t.Fatalf("parseComposeImages length = %d, want %d: %#v", len(images), len(want), images)
+	}
+	for i := range want {
+		if images[i] != want[i] {
+			t.Fatalf("parseComposeImages[%d] = %q, want %q", i, images[i], want[i])
+		}
+	}
+}
+
 func TestDigestFromInspectOutput(t *testing.T) {
 	out := "Name: nginx:stable\nDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
 	got := digestFromInspectOutput(out)

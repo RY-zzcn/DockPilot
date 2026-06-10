@@ -186,7 +186,7 @@ func composeProject(name, path string, managed bool) protocol.ComposeProjectSnap
 
 func commandOutput(ctx context.Context, name string, args ...string) string {
 	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

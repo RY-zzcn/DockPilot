@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -244,22 +245,36 @@ func composeImages(ctx context.Context, path string) ([]string, error) {
 	path = composeFilePath(path)
 	args := append([]string{"compose"}, composeFileArgs(path)...)
 	args = append(args, "config", "--images")
-	out, err := commandCombinedInDir(ctx, composeProjectDir(path), "docker", args...)
+	out, err := commandStdoutInDir(ctx, composeProjectDir(path), "docker", args...)
 	if err != nil {
 		return nil, fmt.Errorf("read compose images: %w: %s", err, strings.TrimSpace(out))
 	}
+	return parseComposeImages(out), nil
+}
+
+func parseComposeImages(out string) []string {
 	seen := map[string]bool{}
 	var images []string
 	for _, line := range strings.Split(out, "\n") {
 		image := strings.TrimSpace(line)
-		if image == "" || seen[image] {
+		if image == "" || seen[image] || !isComposeImageReference(image) {
 			continue
 		}
 		seen[image] = true
 		images = append(images, image)
 	}
 	sort.Strings(images)
-	return images, nil
+	return images
+}
+
+func isComposeImageReference(value string) bool {
+	if strings.ContainsAny(value, " \t\r\n\"'") {
+		return false
+	}
+	if strings.HasPrefix(value, "-") || strings.Contains(value, "://") {
+		return false
+	}
+	return strings.Contains(value, "/") || strings.Contains(value, ":") || strings.Contains(value, "@") || !strings.Contains(value, "=")
 }
 
 func composePreflight(ctx context.Context, path string) error {
@@ -287,6 +302,24 @@ func commandCombined(ctx context.Context, name string, args ...string) (string, 
 	return commandCombinedInDir(ctx, "", name, args...)
 }
 
+func commandStdout(ctx context.Context, name string, args ...string) (string, error) {
+	return commandStdoutInDir(ctx, "", name, args...)
+}
+
+func commandStdoutInDir(ctx context.Context, dir string, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return strings.TrimSpace(string(out) + "\n" + stderr.String()), err
+	}
+	return string(out), nil
+}
+
 func commandCombinedInDir(ctx context.Context, dir string, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
@@ -301,7 +334,7 @@ func composeContainerImageIDs(ctx context.Context, path string) (map[string]stri
 	projectDir := composeProjectDir(path)
 	args := append([]string{"compose"}, composeFileArgs(path)...)
 	args = append(args, "ps", "-q")
-	out, err := commandCombinedInDir(ctx, projectDir, "docker", args...)
+	out, err := commandStdoutInDir(ctx, projectDir, "docker", args...)
 	if err != nil {
 		return nil, fmt.Errorf("compose ps: %w: %s", err, compactOutput(out))
 	}
@@ -310,7 +343,7 @@ func composeContainerImageIDs(ctx context.Context, path string) (map[string]stri
 		return map[string]string{}, nil
 	}
 	inspectArgs := append([]string{"inspect", "--format", "{{.Name}}={{.Image}}"}, ids...)
-	out, err = commandCombined(ctx, "docker", inspectArgs...)
+	out, err = commandStdout(ctx, "docker", inspectArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("container inspect: %w: %s", err, compactOutput(out))
 	}

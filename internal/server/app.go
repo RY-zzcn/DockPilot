@@ -90,8 +90,29 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (a *App) routes() {
 	a.mux.HandleFunc("/api/agent/ws", a.hub.HandleWebSocket)
 	a.mux.HandleFunc("/api/auth/login", a.handleLogin)
-	a.mux.Handle("/api/", a.auth.Middleware(http.HandlerFunc(a.handleAPI)))
+	a.mux.Handle("/api/", a.authenticated(http.HandlerFunc(a.handleAPI)))
 	a.mux.HandleFunc("/", a.serveStatic)
+}
+
+func (a *App) authenticated(next http.Handler) http.Handler {
+	return a.auth.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := CurrentUser(r)
+		id, err := strconv.ParseInt(claims.Subject, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "invalid user")
+			return
+		}
+		user, err := a.store.GetUserByID(id)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "user not found")
+			return
+		}
+		if user.Username != claims.Username || user.Role != claims.Role {
+			writeError(w, http.StatusUnauthorized, "user changed")
+			return
+		}
+		next.ServeHTTP(w, r)
+	}))
 }
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
