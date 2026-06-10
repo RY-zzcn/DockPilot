@@ -294,11 +294,16 @@ DOCKPILOT_ADMIN_USER=${ADMIN_USER}
 DOCKPILOT_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 DOCKPILOT_AUTH_SECRET=${AUTH_SECRET}
 DOCKPILOT_AGENT_REGISTRATION_TOKEN=${REGISTRATION_TOKEN}
+DOCKPILOT_RELEASE_REPO=${REPO}
+DOCKPILOT_AGENT_AUTO_UPDATE=${DOCKPILOT_AGENT_AUTO_UPDATE:-false}
+DOCKPILOT_AGENT_AUTO_UPDATE_VERSION=${DOCKPILOT_AGENT_AUTO_UPDATE_VERSION:-latest}
+DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS=${DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS:-3600}
 EOF
   chmod 600 "$SERVER_ENV_FILE"
 }
 
 write_agent_env() {
+  install_mode="${1:-${DOCKPILOT_INSTALL_MODE:-binary}}"
   mkdir -p "$ENV_DIR"
   if [ -z "$SERVER_URL" ]; then
     SERVER_URL="$(ask "Server URL" "")"
@@ -316,6 +321,8 @@ DOCKPILOT_STATE_PATH=${AGENT_DATA}/agent.json
 DOCKPILOT_NODE_NAME=${NODE_NAME}
 DOCKPILOT_COMPOSE_DIRS=${COMPOSE_DIRS}
 DOCKPILOT_UPDATE_CACHE_SECONDS=${DOCKPILOT_UPDATE_CACHE_SECONDS:-900}
+DOCKPILOT_INSTALL_MODE=${install_mode}
+DOCKPILOT_RELEASE_REPO=${REPO}
 EOF
   chmod 600 "$AGENT_ENV_FILE"
 }
@@ -391,6 +398,8 @@ services:
       DOCKPILOT_NODE_NAME: ${HOSTNAME:-local-vps}
       DOCKPILOT_COMPOSE_DIRS: /opt,/srv,/var/www
       DOCKPILOT_UPDATE_CACHE_SECONDS: ${DOCKPILOT_UPDATE_CACHE_SECONDS:-900}
+      DOCKPILOT_INSTALL_MODE: docker
+      DOCKPILOT_RELEASE_REPO: ${DOCKPILOT_RELEASE_REPO:-RY-zzcn/DockPilot}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt:/opt
@@ -422,6 +431,10 @@ DOCKPILOT_ADMIN_USER=${ADMIN_USER}
 DOCKPILOT_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 DOCKPILOT_AUTH_SECRET=${AUTH_SECRET}
 DOCKPILOT_AGENT_REGISTRATION_TOKEN=${REGISTRATION_TOKEN}
+DOCKPILOT_RELEASE_REPO=${REPO}
+DOCKPILOT_AGENT_AUTO_UPDATE=${DOCKPILOT_AGENT_AUTO_UPDATE:-false}
+DOCKPILOT_AGENT_AUTO_UPDATE_VERSION=${DOCKPILOT_AGENT_AUTO_UPDATE_VERSION:-latest}
+DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS=${DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS:-3600}
 EOF
   chmod 600 "$(dirname "$COMPOSE_FILE")/.env"
 }
@@ -465,7 +478,11 @@ install_server_binary() {
   write_server_service
   chown -R dockpilot:dockpilot "$SERVER_ROOT" "$SERVER_DATA"
   systemctl daemon-reload
-  systemctl enable --now dockpilot-server
+  if systemctl is-active --quiet dockpilot-server; then
+    systemctl restart dockpilot-server
+  else
+    systemctl enable --now dockpilot-server
+  fi
   log "server URL: ${PUBLIC_URL}"
   log "admin user: ${ADMIN_USER}"
   log "admin password: ${ADMIN_PASSWORD}"
@@ -480,7 +497,7 @@ install_agent_docker() {
     *) die "Agent Docker images currently support linux_amd64 and linux_arm64. Use install-agent-binary on ${suffix}." ;;
   esac
   ensure_docker
-  write_agent_env
+  write_agent_env docker
   image_tag="latest"
   if [ "$VERSION" != "latest" ]; then
     image_tag="v$(clean_version)"
@@ -508,10 +525,14 @@ install_agent_binary() {
   tar -xzf "${tmp}/${asset}" -C "$tmp"
   mkdir -p "$AGENT_ROOT" "$AGENT_DATA"
   install -m 0755 "${tmp}/dockpilot-agent" "${AGENT_ROOT}/dockpilot-agent"
-  write_agent_env
+  write_agent_env binary
   write_agent_service
   systemctl daemon-reload
-  systemctl enable --now dockpilot-agent
+  if systemctl is-active --quiet dockpilot-agent; then
+    systemctl restart dockpilot-agent
+  else
+    systemctl enable --now dockpilot-agent
+  fi
   log "agent service started"
 }
 

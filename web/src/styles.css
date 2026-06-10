@@ -180,9 +180,17 @@ textarea {
   outline: none;
 }
 
-select option {
+select,
+select option,
+select optgroup,
+.theme-select select,
+.theme-select select option {
   background: var(--panel-strong);
   color: var(--text);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--cyan);
 }
 
 input:focus,
@@ -686,6 +694,19 @@ small,
   overflow-wrap: anywhere;
 }
 
+.fact-grid em {
+  font-style: normal;
+}
+
+.text-link {
+  color: var(--cyan);
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -884,6 +905,12 @@ td {
   color: var(--cyan);
   font-size: 12px;
   font-weight: 900;
+}
+
+.muted-line {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .aligned {

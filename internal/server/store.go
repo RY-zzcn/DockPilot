@@ -360,6 +360,12 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_metrics_node_recorded ON node_metrics(node_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_node_created ON tasks(node_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
@@ -1130,6 +1136,25 @@ func (s *Store) EnabledNotifications() ([]Notification, error) {
 func (s *Store) AddEvent(severity, eventType, message string, payload any) error {
 	raw, _ := json.Marshal(payload)
 	_, err := s.db.Exec(`INSERT INTO events(severity, type, message, payload, created_at) VALUES(?,?,?,?,datetime('now','localtime'))`, severity, eventType, message, string(raw))
+	return err
+}
+
+func (s *Store) Setting(key, fallback string) string {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func (s *Store) SetSetting(key, value string) error {
+	_, err := s.db.Exec(`
+INSERT INTO settings(key, value, updated_at)
+VALUES(?,?,datetime('now','localtime'))
+ON CONFLICT(key) DO UPDATE SET
+  value = excluded.value,
+  updated_at = datetime('now','localtime')`, key, value)
 	return err
 }
 

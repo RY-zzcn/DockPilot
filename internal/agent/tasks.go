@@ -13,8 +13,13 @@ import (
 )
 
 type TaskExecutor struct {
-	Docker   DockerClient
-	Detector *UpdateDetector
+	Docker            DockerClient
+	Detector          *UpdateDetector
+	ServerURL         string
+	RegistrationToken string
+	NodeName          string
+	InstallMode       string
+	ReleaseRepo       string
 }
 
 func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, logLine func(string)) protocol.TaskResultPayload {
@@ -25,11 +30,14 @@ func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, lo
 		Status: "success",
 	}
 	var err error
+	restartAgent := false
 	switch task.Kind {
 	case "detect_updates":
 		var updates []protocol.UpdateDetection
 		updates, err = t.detectUpdates(taskCtx, task, logLine)
 		status.Updates = updates
+	case "agent_update":
+		restartAgent, err = t.agentUpdate(taskCtx, task, logLine)
 	case "compose_update":
 		err = t.composeUpdate(taskCtx, task, logLine)
 	case "compose_deploy":
@@ -47,6 +55,7 @@ func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, lo
 		status.ExitCode = 1
 		return status
 	}
+	status.RestartAgent = restartAgent
 	status.Message = "completed"
 	return status
 }

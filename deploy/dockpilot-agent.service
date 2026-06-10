@@ -10,6 +10,8 @@ Environment=DOCKPILOT_SERVER_URL=http://127.0.0.1:8080
 Environment=DOCKPILOT_REGISTRATION_TOKEN=change-me-registration-token
 Environment=DOCKPILOT_STATE_PATH=/var/lib/dockpilot-agent/agent.json
 Environment=DOCKPILOT_COMPOSE_DIRS=/opt,/srv,/var/www
+Environment=DOCKPILOT_INSTALL_MODE=binary
+Environment=DOCKPILOT_RELEASE_REPO=RY-zzcn/DockPilot
 Environment=TZ=Asia/Shanghai
 EnvironmentFile=-/etc/dockpilot/agent.env
 ExecStart=/opt/dockpilot-agent/dockpilot-agent

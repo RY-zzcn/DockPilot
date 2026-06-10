@@ -39,6 +39,13 @@ curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dock
 - `--target`：卸载目标，支持 `agent`、`server`、`all`。
 - `--purge`：卸载时同时删除数据。
 
+常用环境变量：
+
+- `DOCKPILOT_RELEASE_REPO`：Release 仓库，默认 `RY-zzcn/DockPilot`。
+- `DOCKPILOT_AGENT_AUTO_UPDATE`：是否启用 Agent 自动升级，默认 `false`。
+- `DOCKPILOT_AGENT_AUTO_UPDATE_VERSION`：Agent 自动升级目标，默认 `latest`。
+- `DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS`：自动升级扫描间隔，默认 `3600` 秒。
+
 ## 部署 Server
 
 ### Docker 方式
@@ -140,6 +147,8 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
   -e DOCKPILOT_REGISTRATION_TOKEN=YOUR_REGISTRATION_TOKEN \
   -e DOCKPILOT_NODE_NAME=vps-01 \
   -e DOCKPILOT_COMPOSE_DIRS=/opt,/srv,/var/www \
+  -e DOCKPILOT_INSTALL_MODE=docker \
+  -e DOCKPILOT_RELEASE_REPO=RY-zzcn/DockPilot \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt:/opt \
   -v /srv:/srv \
@@ -161,6 +170,23 @@ install -m 0755 dockpilot-agent /opt/dockpilot-agent/dockpilot-agent
 然后参考包内 `deploy/dockpilot-agent.service` 和 `/etc/dockpilot/agent.env` 创建 systemd 服务。
 
 ## 升级
+
+面板设置页会显示当前 Server 版本、最新 Release、每个节点的 Agent 版本和升级状态。管理员可以在面板中为单个节点创建 Agent 升级任务，也可以批量升级所有落后节点。
+
+Agent 自动升级默认关闭。开启后，Server 会按 `DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS` 或面板显示的间隔扫描在线节点，发现 Agent 版本落后于目标版本时创建 `agent_update` 任务。目标版本为 `latest` 时会使用 GitHub 最新 Release。
+
+Agent 升级任务行为：
+
+- 二进制 Agent：下载匹配系统架构的 `dockpilot-agent_<version>_<arch>.tar.gz`，替换当前二进制并退出，由 systemd 自动重启。
+- Docker Agent：调用一键脚本重新创建 `dockpilot-agent` 容器，并保留已有 Agent state volume。
+
+开启自动升级：
+
+```bash
+DOCKPILOT_AGENT_AUTO_UPDATE=true
+DOCKPILOT_AGENT_AUTO_UPDATE_VERSION=latest
+DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS=3600
+```
 
 ### Docker 升级
 

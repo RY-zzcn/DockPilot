@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/url"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -177,7 +178,15 @@ func (c *Client) sendSnapshot(ctx context.Context, send func(protocol.Message) e
 }
 
 func (c *Client) handleTask(ctx context.Context, task protocol.TaskPayload, send func(protocol.Message) error) {
-	executor := TaskExecutor{Docker: c.docker, Detector: c.detector}
+	executor := TaskExecutor{
+		Docker:            c.docker,
+		Detector:          c.detector,
+		ServerURL:         c.cfg.ServerURL,
+		RegistrationToken: c.cfg.RegistrationToken,
+		NodeName:          c.cfg.Name,
+		InstallMode:       c.cfg.InstallMode,
+		ReleaseRepo:       c.cfg.ReleaseRepo,
+	}
 	logLine := func(line string) {
 		msg, _ := protocol.NewMessage(protocol.TypeTaskLog, c.cfg.NodeID, protocol.TaskLogPayload{
 			TaskID: task.ID,
@@ -189,6 +198,13 @@ func (c *Client) handleTask(ctx context.Context, task protocol.TaskPayload, send
 	msg, _ := protocol.NewMessage(protocol.TypeTaskResult, c.cfg.NodeID, result)
 	_ = send(msg)
 	c.sendSnapshot(ctx, send)
+	if result.RestartAgent {
+		go func() {
+			log.Printf("agent restart requested after task %s", task.ID)
+			time.Sleep(2 * time.Second)
+			os.Exit(0)
+		}()
+	}
 }
 
 func (c *Client) updateState(nodeID, nodeToken string) {

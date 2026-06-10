@@ -19,6 +19,10 @@ Environment=DOCKPILOT_ADMIN_USER=admin
 Environment=DOCKPILOT_ADMIN_PASSWORD=admin
 Environment=DOCKPILOT_AUTH_SECRET=change-me-auth-secret
 Environment=DOCKPILOT_AGENT_REGISTRATION_TOKEN=change-me-registration-token
+Environment=DOCKPILOT_RELEASE_REPO=RY-zzcn/DockPilot
+Environment=DOCKPILOT_AGENT_AUTO_UPDATE=false
+Environment=DOCKPILOT_AGENT_AUTO_UPDATE_VERSION=latest
+Environment=DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS=3600
 EnvironmentFile=-/etc/dockpilot/server.env
 ExecStart=/opt/dockpilot/dockpilot-server
 Restart=always

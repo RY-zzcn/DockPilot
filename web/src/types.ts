@@ -161,10 +161,39 @@ export interface InstallInfo {
   uninstall_purge?: string
 }
 
+export interface ReleaseAsset {
+  name: string
+  download_url: string
+  size: number
+}
+
+export interface ReleaseInfo {
+  repository: string
+  latest_version: string
+  latest_tag: string
+  name?: string
+  url?: string
+  published_at?: string
+  checked_at: string
+  update_available: boolean
+  assets?: ReleaseAsset[]
+  error?: string
+}
+
+export interface RuntimeSettings {
+  release_repo: string
+  release_cache_seconds: number
+  agent_auto_update: boolean
+  agent_auto_update_version: string
+  agent_auto_update_interval_seconds: number
+}
+
 export interface VersionInfo {
   version: string
   commit: string
   build_date: string
   time_zone: string
   server_time: string
+  release?: ReleaseInfo
+  settings?: RuntimeSettings
 }

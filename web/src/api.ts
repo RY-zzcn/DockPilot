@@ -7,6 +7,7 @@ import type {
   Notification,
   Overview,
   Policy,
+  RuntimeSettings,
   Task,
   TaskLog,
   User,
@@ -111,6 +112,12 @@ export const api = {
   createUser: (body: { username: string; password: string; role: string }) =>
     request<User>('/api/users', {
       method: 'POST',
+      body: JSON.stringify(body)
+    }),
+  runtimeSettings: () => request<RuntimeSettings>('/api/settings/runtime'),
+  saveRuntimeSettings: (body: Partial<Pick<RuntimeSettings, 'agent_auto_update' | 'agent_auto_update_version'>>) =>
+    request<RuntimeSettings>('/api/settings/runtime', {
+      method: 'PUT',
       body: JSON.stringify(body)
     }),
   installInfo: () => request<InstallInfo>('/api/settings/install')

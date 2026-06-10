@@ -20,6 +20,8 @@ type Config struct {
 	MetricsInterval   time.Duration
 	SnapshotInterval  time.Duration
 	UpdateCacheTTL    time.Duration
+	InstallMode       string
+	ReleaseRepo       string
 }
 
 type State struct {
@@ -41,6 +43,8 @@ func LoadConfig() Config {
 		MetricsInterval:   time.Duration(envInt("DOCKPILOT_METRICS_INTERVAL_SECONDS", 15)) * time.Second,
 		SnapshotInterval:  time.Duration(envInt("DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS", 60)) * time.Second,
 		UpdateCacheTTL:    time.Duration(envInt("DOCKPILOT_UPDATE_CACHE_SECONDS", 900)) * time.Second,
+		InstallMode:       env("DOCKPILOT_INSTALL_MODE", ""),
+		ReleaseRepo:       env("DOCKPILOT_RELEASE_REPO", "RY-zzcn/DockPilot"),
 	}
 	flag.StringVar(&cfg.ServerURL, "server", cfg.ServerURL, "DockPilot server URL")
 	flag.StringVar(&cfg.RegistrationToken, "registration-token", cfg.RegistrationToken, "one-time registration token")
@@ -48,6 +52,8 @@ func LoadConfig() Config {
 	flag.StringVar(&cfg.NodeToken, "node-token", cfg.NodeToken, "existing node token")
 	flag.StringVar(&cfg.Name, "name", cfg.Name, "node display name")
 	flag.StringVar(&cfg.StatePath, "state", cfg.StatePath, "agent state file")
+	flag.StringVar(&cfg.InstallMode, "install-mode", cfg.InstallMode, "agent install mode: binary or docker")
+	flag.StringVar(&cfg.ReleaseRepo, "release-repo", cfg.ReleaseRepo, "GitHub repo for DockPilot releases")
 	composeDirs := strings.Join(cfg.ComposeDirs, ",")
 	flag.StringVar(&composeDirs, "compose-dirs", composeDirs, "comma-separated compose scan directories")
 	flag.Parse()

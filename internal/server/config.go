@@ -14,7 +14,12 @@ type Config struct {
 	WebDist                string
 	PublicURL              string
 	TimeZone               string
+	ReleaseRepo            string
+	ReleaseCacheTTL        time.Duration
 	AgentRegistrationToken string
+	AgentAutoUpdate        bool
+	AgentAutoUpdateVersion string
+	AgentAutoUpdateInterval time.Duration
 	AuthSecret             string
 	AdminUsername          string
 	AdminPassword          string
@@ -30,7 +35,12 @@ func LoadConfig() Config {
 		WebDist:                env("DOCKPILOT_WEB_DIST", "web/dist"),
 		PublicURL:              env("DOCKPILOT_PUBLIC_URL", "http://127.0.0.1:8080"),
 		TimeZone:               env("DOCKPILOT_TIMEZONE", "Asia/Shanghai"),
+		ReleaseRepo:            env("DOCKPILOT_RELEASE_REPO", "RY-zzcn/DockPilot"),
+		ReleaseCacheTTL:        time.Duration(envInt("DOCKPILOT_RELEASE_CACHE_SECONDS", 900)) * time.Second,
 		AgentRegistrationToken: env("DOCKPILOT_AGENT_REGISTRATION_TOKEN", "change-me-registration-token"),
+		AgentAutoUpdate:        envBool("DOCKPILOT_AGENT_AUTO_UPDATE", false),
+		AgentAutoUpdateVersion: env("DOCKPILOT_AGENT_AUTO_UPDATE_VERSION", "latest"),
+		AgentAutoUpdateInterval: time.Duration(envInt("DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS", 3600)) * time.Second,
 		AuthSecret:             env("DOCKPILOT_AUTH_SECRET", "change-me-auth-secret"),
 		AdminUsername:          env("DOCKPILOT_ADMIN_USER", "admin"),
 		AdminPassword:          env("DOCKPILOT_ADMIN_PASSWORD", "admin"),
@@ -52,6 +62,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return fallback
 	}

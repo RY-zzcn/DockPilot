@@ -166,7 +166,7 @@
               >
                 <span class="status-dot" :class="node.status"></span>
                 <span>{{ node.name }}</span>
-                <small>{{ node.docker_version || 'Docker -' }}</small>
+                <small>{{ node.docker_version || 'Docker -' }} · Agent {{ node.version || '-' }}</small>
               </button>
             </div>
           </section>
@@ -204,7 +204,7 @@
               >
                 <span class="status-dot" :class="node.status"></span>
                 <span>{{ node.name }}</span>
-                <small>{{ node.os }}/{{ node.arch }}</small>
+                <small>{{ node.os }}/{{ node.arch }} · {{ agentVersionLabel(node) }}</small>
               </button>
             </div>
           </section>
@@ -219,6 +219,13 @@
               <strong>{{ selectedNode?.docker_version || '-' }}</strong>
               <span>Compose</span>
               <strong>{{ selectedNode?.compose_version || '-' }}</strong>
+              <span>Agent</span>
+              <strong>{{ selectedNode?.version ? `v${selectedNode.version}` : '-' }}</strong>
+              <span>版本状态</span>
+              <strong>
+                <em v-if="selectedNode" :class="agentVersionBadgeClass(selectedNode)">{{ agentVersionLabel(selectedNode) }}</em>
+                <span v-else>-</span>
+              </strong>
               <span>最近心跳</span>
               <strong>{{ selectedNode?.last_seen || '-' }}</strong>
               <span>备注</span>
@@ -254,6 +261,10 @@
               <button class="secondary" :disabled="!selectedNodeId || !isAdmin" @click="createNodeTask('prune_images')">
                 <Trash2 :size="18" />
                 清理镜像
+              </button>
+              <button class="secondary" :disabled="!selectedNode || !isAdmin || !agentCanUpdate(selectedNode)" @click="upgradeAgent(selectedNode)">
+                <RefreshCw :size="18" />
+                升级 Agent
               </button>
             </div>
           </section>
@@ -451,14 +462,85 @@
           <div class="fact-grid">
             <span>Server</span>
             <strong>v{{ versionInfo.version }}</strong>
+            <span>最新发布</span>
+            <strong>
+              <a v-if="versionInfo.release?.url" class="text-link" :href="versionInfo.release.url" target="_blank" rel="noreferrer">
+                {{ latestReleaseLabel }}
+              </a>
+              <span v-else>{{ latestReleaseLabel }}</span>
+            </strong>
+            <span>发布状态</span>
+            <strong><em :class="releaseStatusClass">{{ releaseStatusText }}</em></strong>
+            <span>发布仓库</span>
+            <strong>{{ versionInfo.release?.repository || runtimeSettings.release_repo || '-' }}</strong>
             <span>Commit</span>
             <strong>{{ shortCommit }}</strong>
             <span>构建时间</span>
             <strong>{{ versionInfo.build_date || '-' }}</strong>
+            <span>发布时间</span>
+            <strong>{{ versionInfo.release?.published_at || '-' }}</strong>
             <span>服务时间</span>
             <strong>{{ versionInfo.server_time || '-' }}</strong>
             <span>时区</span>
             <strong>{{ versionInfo.time_zone || 'Asia/Shanghai' }}</strong>
+          </div>
+          <form class="form-grid" @submit.prevent="saveRuntimeSettings">
+            <label class="checkline">
+              <input v-model="runtimeSettings.agent_auto_update" type="checkbox" :disabled="!isAdmin" />
+              Agent 自动升级
+            </label>
+            <label>
+              <span>Agent 目标版本</span>
+              <input v-model="runtimeSettings.agent_auto_update_version" :disabled="!isAdmin" placeholder="latest 或 v0.2.0" />
+            </label>
+            <label>
+              <span>扫描间隔</span>
+              <input :value="formatDuration(runtimeSettings.agent_auto_update_interval_seconds)" disabled />
+            </label>
+            <button class="primary aligned" :disabled="!isAdmin">
+              <Save :size="18" />
+              保存
+            </button>
+          </form>
+          <div class="button-row">
+            <button class="secondary" :disabled="!isAdmin || outdatedAgentCount === 0" @click="upgradeOutdatedAgents">
+              <RefreshCw :size="18" />
+              升级落后节点
+            </button>
+            <span class="muted-line">{{ outdatedAgentCount }} 个节点可升级</span>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>节点版本</h2>
+            <Server :size="18" />
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>节点</th>
+                  <th>Agent</th>
+                  <th>系统</th>
+                  <th>状态</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="node in nodes" :key="node.id">
+                  <td>{{ node.name }}</td>
+                  <td>{{ node.version ? `v${node.version}` : '-' }}</td>
+                  <td>{{ node.os }}/{{ node.arch }}</td>
+                  <td><span :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</span></td>
+                  <td>
+                    <button class="icon-button" title="升级 Agent" :disabled="!isAdmin || !agentCanUpdate(node)" @click="upgradeAgent(node)">
+                      <RefreshCw :size="16" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
 
@@ -677,6 +759,7 @@ import type {
   Notification,
   Overview,
   Policy,
+  RuntimeSettings,
   Task,
   TaskLog,
   User,
@@ -741,7 +824,16 @@ const versionInfo = reactive<VersionInfo>({
   commit: 'dev',
   build_date: 'unknown',
   time_zone: 'Asia/Shanghai',
-  server_time: ''
+  server_time: '',
+  release: undefined,
+  settings: undefined
+})
+const runtimeSettings = reactive<RuntimeSettings>({
+  release_repo: 'RY-zzcn/DockPilot',
+  release_cache_seconds: 900,
+  agent_auto_update: false,
+  agent_auto_update_version: 'latest',
+  agent_auto_update_interval_seconds: 3600
 })
 const installInfo = reactive<InstallInfo>({
   server_url: '',
@@ -782,6 +874,28 @@ const selectedNode = computed(() => nodes.value.find((node) => node.id === selec
 const memoryPercent = computed(() => percent(overview.last_metric.memory_used, overview.last_metric.memory_total))
 const diskPercent = computed(() => percent(overview.last_metric.disk_used, overview.last_metric.disk_total))
 const shortCommit = computed(() => (versionInfo.commit && versionInfo.commit !== 'dev' ? versionInfo.commit.slice(0, 12) : versionInfo.commit || '-'))
+const latestReleaseVersion = computed(() => versionInfo.release?.latest_version || '')
+const agentTargetVersion = computed(() => {
+  const configured = runtimeSettings.agent_auto_update_version || 'latest'
+  if (configured === 'latest') {
+    return latestReleaseVersion.value || 'latest'
+  }
+  return configured
+})
+const latestReleaseLabel = computed(() => {
+  if (versionInfo.release?.error && !latestReleaseVersion.value) return '获取失败'
+  return latestReleaseVersion.value ? `v${latestReleaseVersion.value}` : '-'
+})
+const releaseStatusText = computed(() => {
+  if (versionInfo.release?.error && !latestReleaseVersion.value) return versionInfo.release.error
+  if (!latestReleaseVersion.value) return '未获取'
+  return versionInfo.release?.update_available ? 'Server 可升级' : 'Server 已是最新'
+})
+const releaseStatusClass = computed(() => {
+  if (versionInfo.release?.error && !latestReleaseVersion.value) return 'mini-danger'
+  return versionInfo.release?.update_available ? 'mini-alert' : 'mini-muted'
+})
+const outdatedAgentCount = computed(() => nodes.value.filter((node) => agentCanUpdate(node)).length)
 const viewTitle = computed(() => {
   const titles: Record<ViewName, string> = {
     dashboard: '总览',
@@ -956,6 +1070,9 @@ async function refreshAll() {
     policies.value = policiesData
     notifications.value = notificationsData
     Object.assign(versionInfo, versionData)
+    if (versionData.settings) {
+      Object.assign(runtimeSettings, versionData.settings)
+    }
     syncPolicyDrafts()
     if (!selectedNodeId.value && nodes.value.length > 0) {
       selectedNodeId.value = nodes.value[0].id
@@ -971,8 +1088,9 @@ async function refreshAll() {
 }
 
 async function loadAdminSettings() {
-  const [install, userList] = await Promise.all([api.installInfo(), api.users()])
+  const [install, userList, settings] = await Promise.all([api.installInfo(), api.users(), api.runtimeSettings()])
   Object.assign(installInfo, install)
+  Object.assign(runtimeSettings, settings)
   users.value = userList
 }
 
@@ -1014,6 +1132,33 @@ async function createNodeTask(kind: string, targetType = '', targetId = '') {
   if (!selectedNodeId.value) return
   await api.createTask({ node_id: selectedNodeId.value, kind, target_type: targetType, target_id: targetId, args: {} })
   await refreshTasks()
+}
+
+async function upgradeAgent(node?: Node) {
+  if (!node) return
+  await createAgentUpdateTask(node)
+  await refreshTasks()
+}
+
+async function upgradeOutdatedAgents() {
+  const targets = nodes.value.filter((node) => agentCanUpdate(node))
+  if (targets.length === 0) return
+  const confirmed = window.confirm(`为 ${targets.length} 个落后节点创建 Agent 升级任务？`)
+  if (!confirmed) return
+  for (const node of targets) {
+    await createAgentUpdateTask(node)
+  }
+  await refreshTasks()
+}
+
+function createAgentUpdateTask(node: Node) {
+  return api.createTask({
+    node_id: node.id,
+    kind: 'agent_update',
+    target_type: 'node',
+    target_id: node.id,
+    args: { version: agentTargetVersion.value }
+  })
 }
 
 async function createProjectTask(kind: string, project: ComposeProject) {
@@ -1112,6 +1257,15 @@ async function savePolicy(policy: Policy) {
   policies.value = await api.policies()
 }
 
+async function saveRuntimeSettings() {
+  const saved = await api.saveRuntimeSettings({
+    agent_auto_update: runtimeSettings.agent_auto_update,
+    agent_auto_update_version: runtimeSettings.agent_auto_update_version || 'latest'
+  })
+  Object.assign(runtimeSettings, saved)
+  versionInfo.settings = { ...saved }
+}
+
 function editNotification(item: Notification) {
   Object.assign(notificationForm, item)
 }
@@ -1174,6 +1328,54 @@ function detectionMeta(project: ComposeProject) {
   return [project.detection_method, project.detection_platform, project.checked_at].filter(Boolean).join(' · ')
 }
 
+function agentCanUpdate(node?: Node) {
+  if (!node || node.status !== 'online') return false
+  const latest = latestReleaseVersion.value || (agentTargetVersion.value !== 'latest' ? agentTargetVersion.value : '')
+  return !!latest && compareVersions(node.version, latest) < 0
+}
+
+function agentVersionLabel(node: Node) {
+  if (node.status !== 'online') return '离线'
+  const latest = latestReleaseVersion.value
+  if (!node.version) return latest ? `可升级到 v${latest}` : '版本未知'
+  if (!latest) return `Agent v${node.version}`
+  if (compareVersions(node.version, latest) < 0) return `可升级到 v${latest}`
+  return '最新'
+}
+
+function agentVersionBadgeClass(node: Node) {
+  if (node.status !== 'online') return 'mini-danger'
+  if (agentCanUpdate(node)) return 'mini-alert'
+  return 'mini-muted'
+}
+
+function cleanVersion(value: string) {
+  return (value || '').trim().replace(/^v/, '')
+}
+
+function compareVersions(left: string, right: string) {
+  const a = cleanVersion(left)
+  const b = cleanVersion(right)
+  if (a === b) return 0
+  if (!a) return -1
+  if (!b) return 1
+  const aHasDigit = /\d/.test(a)
+  const bHasDigit = /\d/.test(b)
+  if (!aHasDigit && bHasDigit) return -1
+  if (aHasDigit && !bHasDigit) return 1
+  const parse = (value: string) => value.split(/[.+-]/).map((part) => Number.parseInt(part, 10) || 0)
+  const ap = parse(a)
+  const bp = parse(b)
+  const length = Math.max(ap.length, bp.length)
+  for (let index = 0; index < length; index += 1) {
+    const av = ap[index] || 0
+    const bv = bp[index] || 0
+    if (av < bv) return -1
+    if (av > bv) return 1
+  }
+  return 0
+}
+
 function percent(used: number, total: number) {
   if (!total) return 0
   return (used / total) * 100
@@ -1198,5 +1400,13 @@ function formatBytes(value: number) {
     unit += 1
   }
   return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`
+}
+
+function formatDuration(seconds: number) {
+  if (!seconds) return '-'
+  if (seconds % 86400 === 0) return `${seconds / 86400} 天`
+  if (seconds % 3600 === 0) return `${seconds / 3600} 小时`
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`
+  return `${seconds} 秒`
 }
 </script>

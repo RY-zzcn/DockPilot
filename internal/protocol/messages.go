@@ -152,11 +152,12 @@ type TaskLogPayload struct {
 }
 
 type TaskResultPayload struct {
-	TaskID   string            `json:"task_id"`
-	Status   string            `json:"status"`
-	Message  string            `json:"message,omitempty"`
-	ExitCode int               `json:"exit_code"`
-	Updates  []UpdateDetection `json:"updates,omitempty"`
+	TaskID       string            `json:"task_id"`
+	Status       string            `json:"status"`
+	Message      string            `json:"message,omitempty"`
+	ExitCode     int               `json:"exit_code"`
+	Updates      []UpdateDetection `json:"updates,omitempty"`
+	RestartAgent bool              `json:"restart_agent,omitempty"`
 }
 
 type ErrorPayload struct {

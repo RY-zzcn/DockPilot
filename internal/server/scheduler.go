@@ -6,22 +6,28 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/dockpilot/dockpilot/internal/version"
 )
 
 type Scheduler struct {
 	store            *Store
 	hub              *AgentHub
 	notifier         *Notifier
+	releases         *ReleaseService
+	cfg              Config
 	heartbeatTimeout time.Duration
 	lastRun          map[string]time.Time
 }
 
-func NewScheduler(store *Store, hub *AgentHub, notifier *Notifier, heartbeatTimeout time.Duration) *Scheduler {
+func NewScheduler(store *Store, hub *AgentHub, notifier *Notifier, releases *ReleaseService, cfg Config) *Scheduler {
 	return &Scheduler{
 		store:            store,
 		hub:              hub,
 		notifier:         notifier,
-		heartbeatTimeout: heartbeatTimeout,
+		releases:         releases,
+		cfg:              cfg,
+		heartbeatTimeout: cfg.HeartbeatTimeout,
 		lastRun:          map[string]time.Time{},
 	}
 }
@@ -49,6 +55,9 @@ func (s *Scheduler) tick() {
 	}
 	if err := s.enqueuePolicyTasks(); err != nil {
 		log.Printf("enqueue policy tasks failed: %v", err)
+	}
+	if err := s.enqueueAgentUpdateTasks(); err != nil {
+		log.Printf("enqueue agent update tasks failed: %v", err)
 	}
 }
 
@@ -100,6 +109,77 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 		}
 	}
 	return nil
+}
+
+func (s *Scheduler) enqueueAgentUpdateTasks() error {
+	settings := s.agentUpdateSettings()
+	if !settings.enabled {
+		return nil
+	}
+	key := "agent-update:scan"
+	if !s.lastRun[key].IsZero() && time.Since(s.lastRun[key]) < s.cfg.AgentAutoUpdateInterval {
+		return nil
+	}
+	s.lastRun[key] = time.Now()
+
+	targetVersion := version.Clean(settings.targetVersion)
+	if targetVersion == "" || targetVersion == "latest" {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		release := s.releases.Latest(ctx, "", false)
+		cancel()
+		if release.Error != "" && release.LatestVersion == "" {
+			return nil
+		}
+		targetVersion = release.LatestVersion
+	}
+	if targetVersion == "" {
+		return nil
+	}
+	nodes, err := s.store.ListNodes()
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if node.Status != "online" || !version.IsOutdated(node.Version, targetVersion) {
+			continue
+		}
+		nodeKey := "agent-update:" + node.ID + ":" + targetVersion
+		if !s.lastRun[nodeKey].IsZero() && time.Since(s.lastRun[nodeKey]) < s.cfg.AgentAutoUpdateInterval {
+			continue
+		}
+		args := map[string]string{
+			"version":    targetVersion,
+			"repo":       s.cfg.ReleaseRepo,
+			"server_url": s.cfg.PublicURL,
+		}
+		payload, _ := json.Marshal(args)
+		task, err := s.store.CreateTask(Task{
+			NodeID:      node.ID,
+			Kind:        "agent_update",
+			TargetType:  "node",
+			TargetID:    node.ID,
+			RequestedBy: "agent-auto-update",
+			Payload:     string(payload),
+		})
+		if err != nil {
+			continue
+		}
+		s.lastRun[nodeKey] = time.Now()
+		_ = s.hub.EnqueueTask(task)
+	}
+	return nil
+}
+
+type agentUpdateSettings struct {
+	enabled       bool
+	targetVersion string
+}
+
+func (s *Scheduler) agentUpdateSettings() agentUpdateSettings {
+	return agentUpdateSettings{
+		enabled:       parseStoredBool(s.store.Setting("agent_auto_update", ""), s.cfg.AgentAutoUpdate),
+		targetVersion: nonEmpty(s.store.Setting("agent_auto_update_version", s.cfg.AgentAutoUpdateVersion), "latest"),
+	}
 }
 
 func due(policy Policy, last time.Time) bool {

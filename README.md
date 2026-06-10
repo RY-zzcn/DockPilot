@@ -13,6 +13,8 @@ DockPilot 是一个轻量的 Docker / Docker Compose 节点管理面板，采用
 - 权限控制：管理员可操作，viewer 只读。
 - 北京时间：默认 `Asia/Shanghai`，面板、任务、日志、指标按北京时间展示和写入。
 - 多主题 UI：极光、石墨、日冕、终端四种现代化运维面板主题。
+- 版本发布：面板显示当前 Server、最新 GitHub Release、节点 Agent 版本和可升级状态。
+- Agent 升级：支持面板一键升级单个/多个节点，也可开启 Agent 自动升级。
 
 ## 快速部署
 
@@ -105,6 +107,29 @@ docker pull ghcr.io/ry-zzcn/dockpilot-agent:latest
 
 Docker 镜像当前发布 `linux_amd64` 和 `linux_arm64`，标签会同步发布 `latest`、`v<version>` 和 `<version>`。
 
+## 版本与 Agent 自动升级
+
+设置页会显示：
+
+- 当前 Server 版本、commit、构建时间和最新 Release。
+- 每个节点的 Agent 版本、系统架构和升级状态。
+- Agent 自动升级开关、目标版本和扫描间隔。
+
+Agent 升级任务会根据安装方式处理：
+
+- 二进制 + systemd：Agent 下载匹配架构的 Release 包，替换当前二进制，然后退出并由 systemd 拉起。
+- Docker：Agent 调用一键脚本重拉对应版本镜像并重建 `dockpilot-agent` 容器。
+
+自动升级默认关闭。管理员可在设置页开启，或通过环境变量启用：
+
+```bash
+DOCKPILOT_AGENT_AUTO_UPDATE=true
+DOCKPILOT_AGENT_AUTO_UPDATE_VERSION=latest
+DOCKPILOT_AGENT_AUTO_UPDATE_INTERVAL_SECONDS=3600
+```
+
+自动升级会使用 `DOCKPILOT_RELEASE_REPO` 指向的 Release 仓库，默认是 `RY-zzcn/DockPilot`。
+
 ## 本地开发
 
 后端：
@@ -161,6 +186,7 @@ go run ./cmd/agent \
 
 - `/api/auth/*`：登录、刷新、当前用户。
 - `/api/version`：Server 版本、commit、构建时间、服务时区和当前服务时间。
+- `/api/settings/runtime`：Release 仓库信息和 Agent 自动升级设置。
 - `/api/nodes/*`：节点列表、节点详情、节点重命名、备注和删除。
 - `/api/docker/*`：Docker 状态、Compose 保存。
 - `/api/tasks/*`：任务创建、状态、日志、取消和历史清理。

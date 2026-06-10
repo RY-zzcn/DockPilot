@@ -25,6 +25,7 @@ type App struct {
 	notifier  *Notifier
 	hub       *AgentHub
 	scheduler *Scheduler
+	releases  *ReleaseService
 	mux       *http.ServeMux
 }
 
@@ -41,15 +42,17 @@ func NewApp(cfg Config) (*App, error) {
 		return nil, err
 	}
 	notifier := NewNotifier(store)
+	releases := NewReleaseService(cfg.ReleaseRepo, cfg.ReleaseCacheTTL)
 	app := &App{
 		cfg:      cfg,
 		store:    store,
 		auth:     NewAuthService(cfg.AuthSecret),
 		notifier: notifier,
+		releases: releases,
 		mux:      http.NewServeMux(),
 	}
 	app.hub = NewAgentHub(cfg, store, notifier)
-	app.scheduler = NewScheduler(store, app.hub, notifier, cfg.HeartbeatTimeout)
+	app.scheduler = NewScheduler(store, app.hub, notifier, releases, cfg)
 	app.routes()
 	return app, nil
 }
@@ -128,6 +131,10 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		a.handleOverview(w, r)
 	case path == "/version" && r.Method == http.MethodGet:
 		a.handleVersion(w, r)
+	case path == "/settings/runtime" && r.Method == http.MethodGet:
+		RequireAdmin(a.handleRuntimeSettings)(w, r)
+	case path == "/settings/runtime" && (r.Method == http.MethodPost || r.Method == http.MethodPut):
+		RequireAdmin(a.handleSaveRuntimeSettings)(w, r)
 	case path == "/nodes" && r.Method == http.MethodGet:
 		a.handleListNodes(w, r)
 	case strings.HasPrefix(path, "/nodes/") && r.Method == http.MethodGet:
@@ -206,13 +213,65 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
 	info := version.Current()
-	writeJSON(w, http.StatusOK, map[string]string{
+	releaseCtx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	release := a.releases.Latest(releaseCtx, info.Version, r.URL.Query().Get("refresh") == "1")
+	settings := a.runtimeSettings()
+	writeJSON(w, http.StatusOK, map[string]any{
 		"version":     info.Version,
 		"commit":      info.Commit,
 		"build_date":  info.BuildDate,
 		"time_zone":   a.cfg.TimeZone,
 		"server_time": time.Now().In(time.Local).Format(time.RFC3339),
+		"release":     release,
+		"settings":    settings,
 	})
+}
+
+type RuntimeSettings struct {
+	ReleaseRepo                    string `json:"release_repo"`
+	ReleaseCacheSeconds            int64  `json:"release_cache_seconds"`
+	AgentAutoUpdate                bool   `json:"agent_auto_update"`
+	AgentAutoUpdateVersion         string `json:"agent_auto_update_version"`
+	AgentAutoUpdateIntervalSeconds int64  `json:"agent_auto_update_interval_seconds"`
+}
+
+func (a *App) runtimeSettings() RuntimeSettings {
+	return RuntimeSettings{
+		ReleaseRepo:                    a.cfg.ReleaseRepo,
+		ReleaseCacheSeconds:            int64(a.cfg.ReleaseCacheTTL.Seconds()),
+		AgentAutoUpdate:                parseStoredBool(a.store.Setting("agent_auto_update", strconv.FormatBool(a.cfg.AgentAutoUpdate)), a.cfg.AgentAutoUpdate),
+		AgentAutoUpdateVersion:         nonEmpty(a.store.Setting("agent_auto_update_version", a.cfg.AgentAutoUpdateVersion), "latest"),
+		AgentAutoUpdateIntervalSeconds: int64(a.cfg.AgentAutoUpdateInterval.Seconds()),
+	}
+}
+
+func (a *App) handleRuntimeSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, a.runtimeSettings())
+}
+
+func (a *App) handleSaveRuntimeSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		AgentAutoUpdate        *bool  `json:"agent_auto_update"`
+		AgentAutoUpdateVersion string `json:"agent_auto_update_version"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if body.AgentAutoUpdate != nil {
+		if err := a.store.SetSetting("agent_auto_update", strconv.FormatBool(*body.AgentAutoUpdate)); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if strings.TrimSpace(body.AgentAutoUpdateVersion) != "" {
+		if err := a.store.SetSetting("agent_auto_update_version", version.Clean(body.AgentAutoUpdateVersion)); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, a.runtimeSettings())
 }
 
 func (a *App) handleListNodes(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +392,9 @@ func (a *App) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	for i := range tasks {
+		tasks[i].Payload = redactTaskPayload(tasks[i].Payload)
+	}
 	writeJSON(w, http.StatusOK, tasks)
 }
 
@@ -352,6 +414,11 @@ func (a *App) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "node_id and kind are required")
 		return
 	}
+	body.Args = a.prepareTaskArgs(r, body.Kind, body.Args)
+	if body.Kind == "agent_update" {
+		body.TargetType = nonEmpty(body.TargetType, "node")
+		body.TargetID = nonEmpty(body.TargetID, body.NodeID)
+	}
 	payload, _ := json.Marshal(body.Args)
 	task, err := a.store.CreateTask(Task{
 		NodeID:      body.NodeID,
@@ -370,6 +437,26 @@ func (a *App) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, task)
+}
+
+func (a *App) prepareTaskArgs(r *http.Request, kind string, args map[string]string) map[string]string {
+	if args == nil {
+		args = map[string]string{}
+	}
+	if kind != "agent_update" {
+		return args
+	}
+	if strings.TrimSpace(args["version"]) == "" {
+		settings := a.runtimeSettings()
+		args["version"] = nonEmpty(settings.AgentAutoUpdateVersion, "latest")
+	}
+	if strings.TrimSpace(args["repo"]) == "" {
+		args["repo"] = a.cfg.ReleaseRepo
+	}
+	if strings.TrimSpace(args["server_url"]) == "" {
+		args["server_url"] = a.publicURL(r)
+	}
+	return args
 }
 
 func (a *App) handleTaskLogs(w http.ResponseWriter, r *http.Request, taskID string) {
@@ -515,6 +602,40 @@ func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 
 func shellArg(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+}
+
+func parseStoredBool(value string, fallback bool) bool {
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func redactTaskPayload(payload string) string {
+	if payload == "" {
+		return payload
+	}
+	values := map[string]string{}
+	if err := json.Unmarshal([]byte(payload), &values); err != nil {
+		return payload
+	}
+	changed := false
+	for key := range values {
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "token") || strings.Contains(lower, "password") || strings.Contains(lower, "secret") {
+			values[key] = "******"
+			changed = true
+		}
+	}
+	if !changed {
+		return payload
+	}
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return payload
+	}
+	return string(raw)
 }
 
 func (a *App) publicURL(r *http.Request) string {
