@@ -119,15 +119,23 @@ type UpdateDetection struct {
 	TargetID    string                 `json:"target_id,omitempty"`
 	ProjectName string                 `json:"project_name,omitempty"`
 	Path        string                 `json:"path,omitempty"`
+	Error       string                 `json:"error,omitempty"`
 	Images      []ImageUpdateDetection `json:"images"`
 }
 
 type ImageUpdateDetection struct {
-	Image           string `json:"image"`
-	LocalDigest     string `json:"local_digest,omitempty"`
-	RemoteDigest    string `json:"remote_digest,omitempty"`
-	UpdateAvailable bool   `json:"update_available"`
-	Error           string `json:"error,omitempty"`
+	Image                string `json:"image"`
+	Platform             string `json:"platform,omitempty"`
+	Method               string `json:"method,omitempty"`
+	LocalDigest          string `json:"local_digest,omitempty"`
+	RemoteDigest         string `json:"remote_digest,omitempty"`
+	LocalConfigDigest    string `json:"local_config_digest,omitempty"`
+	RemoteConfigDigest   string `json:"remote_config_digest,omitempty"`
+	RemoteManifestDigest string `json:"remote_manifest_digest,omitempty"`
+	Pinned               bool   `json:"pinned,omitempty"`
+	CheckedAt            string `json:"checked_at,omitempty"`
+	UpdateAvailable      bool   `json:"update_available"`
+	Error                string `json:"error,omitempty"`
 }
 
 type TaskPayload struct {

@@ -252,10 +252,13 @@ func (h *AgentHub) handleAgentMessage(msg protocol.Message) {
 				status = TaskFailed
 			}
 			task, _ := h.store.GetTask(payload.TaskID)
-			if status == TaskSuccess && len(payload.Updates) > 0 {
+			if len(payload.Updates) > 0 {
 				count, err := h.store.ApplyUpdateDetections(msg.NodeID, payload.Updates)
 				if err == nil && count > 0 {
 					h.notifier.Notify("warning", "更新可用", payload.TaskID+" 检测到 "+fmt.Sprint(count)+" 个镜像可更新")
+				}
+				if failed := failedDetections(payload.Updates); failed > 0 {
+					h.notifier.Notify("warning", "检测失败", payload.TaskID+" 有 "+fmt.Sprint(failed)+" 项检测失败")
 				}
 			}
 			if status == TaskSuccess && (task.Kind == "compose_update" || task.Kind == "compose_deploy") {
@@ -284,4 +287,20 @@ func errorMessage(nodeID, code, message string) protocol.Message {
 		Message: message,
 	})
 	return msg
+}
+
+func failedDetections(detections []protocol.UpdateDetection) int {
+	count := 0
+	for _, detection := range detections {
+		if detection.Error != "" {
+			count++
+			continue
+		}
+		for _, image := range detection.Images {
+			if image.Error != "" {
+				count++
+			}
+		}
+	}
+	return count
 }

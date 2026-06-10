@@ -62,6 +62,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Public content check
+        run: node scripts/check-public-content.js
+
       - name: Resolve version
         id: vars
         run: |
@@ -86,13 +89,13 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: web/package.json
+          cache-dependency-path: web/package-lock.json
 
       - name: Build web
         if: matrix.server_bundle
         working-directory: web
         run: |
-          npm install
+          npm ci
           npm run build
 
       - name: Build and package

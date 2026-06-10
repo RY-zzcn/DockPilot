@@ -95,17 +95,21 @@ type Image struct {
 }
 
 type ComposeProject struct {
-	ID              string `json:"id"`
-	NodeID          string `json:"node_id"`
-	Name            string `json:"name"`
-	Path            string `json:"path"`
-	Managed         bool   `json:"managed"`
-	Content         string `json:"content,omitempty"`
-	Version         int    `json:"version"`
-	UpdateAvailable bool   `json:"update_available"`
-	CheckedAt       string `json:"checked_at"`
-	LastSeen        string `json:"last_seen"`
-	UpdatedAt       string `json:"updated_at"`
+	ID                string `json:"id"`
+	NodeID            string `json:"node_id"`
+	Name              string `json:"name"`
+	Path              string `json:"path"`
+	Managed           bool   `json:"managed"`
+	Content           string `json:"content,omitempty"`
+	Version           int    `json:"version"`
+	UpdateAvailable   bool   `json:"update_available"`
+	CheckedAt         string `json:"checked_at"`
+	DetectionStatus   string `json:"detection_status"`
+	DetectionMethod   string `json:"detection_method"`
+	DetectionPlatform string `json:"detection_platform"`
+	DetectionError    string `json:"detection_error,omitempty"`
+	LastSeen          string `json:"last_seen"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 type Task struct {
@@ -277,6 +281,10 @@ CREATE TABLE IF NOT EXISTS compose_projects (
   version INTEGER NOT NULL DEFAULT 1,
   update_available INTEGER NOT NULL DEFAULT 0,
   checked_at TEXT NOT NULL DEFAULT '',
+  detection_status TEXT NOT NULL DEFAULT '',
+  detection_method TEXT NOT NULL DEFAULT '',
+  detection_platform TEXT NOT NULL DEFAULT '',
+  detection_error TEXT NOT NULL DEFAULT '',
   last_seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   PRIMARY KEY(node_id, id),
@@ -358,7 +366,19 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 	if err := s.ensureColumn("compose_projects", "update_available", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return s.ensureColumn("compose_projects", "checked_at", "TEXT NOT NULL DEFAULT ''")
+	if err := s.ensureColumn("compose_projects", "checked_at", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "detection_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "detection_method", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "detection_platform", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.ensureColumn("compose_projects", "detection_error", "TEXT NOT NULL DEFAULT ''")
 }
 
 func (s *Store) ensureColumn(table, column, definition string) error {
@@ -643,36 +663,45 @@ func (s *Store) ApplyUpdateDetections(nodeID string, detections []protocol.Updat
 				availableCount++
 			}
 		}
+		status, method, platform, detectionError := detectionSummary(detection)
+		preserveProjectAvailability := status == "failed"
 		if detection.TargetID != "" {
 			if _, err := tx.Exec(`
 UPDATE compose_projects
-SET update_available = ?, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
-WHERE node_id = ? AND id = ?`, boolInt(projectAvailable), nodeID, detection.TargetID); err != nil {
+SET update_available = CASE WHEN ? THEN update_available ELSE ? END,
+    checked_at = datetime('now','localtime'),
+    detection_status = ?,
+    detection_method = ?,
+    detection_platform = ?,
+    detection_error = ?,
+    updated_at = datetime('now','localtime')
+WHERE node_id = ? AND id = ?`, boolInt(preserveProjectAvailability), boolInt(projectAvailable), status, method, platform, detectionError, nodeID, detection.TargetID); err != nil {
 				return 0, err
 			}
 		} else if detection.Path != "" {
 			if _, err := tx.Exec(`
 UPDATE compose_projects
-SET update_available = ?, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
-WHERE node_id = ? AND path = ?`, boolInt(projectAvailable), nodeID, detection.Path); err != nil {
-				return 0, err
-			}
-		}
-		if detection.ProjectName != "" {
-			if _, err := tx.Exec(`UPDATE containers SET update_available = 0, updated_at = datetime('now','localtime') WHERE node_id = ? AND compose_project = ?`, nodeID, detection.ProjectName); err != nil {
+SET update_available = CASE WHEN ? THEN update_available ELSE ? END,
+    checked_at = datetime('now','localtime'),
+    detection_status = ?,
+    detection_method = ?,
+    detection_platform = ?,
+    detection_error = ?,
+    updated_at = datetime('now','localtime')
+WHERE node_id = ? AND path = ?`, boolInt(preserveProjectAvailability), boolInt(projectAvailable), status, method, platform, detectionError, nodeID, detection.Path); err != nil {
 				return 0, err
 			}
 		}
 		for _, image := range detection.Images {
-			if !image.UpdateAvailable {
+			if image.Error != "" {
 				continue
 			}
 			if detection.ProjectName != "" {
-				if _, err := tx.Exec(`UPDATE containers SET update_available = 1, updated_at = datetime('now','localtime') WHERE node_id = ? AND compose_project = ? AND image = ?`, nodeID, detection.ProjectName, image.Image); err != nil {
+				if _, err := tx.Exec(`UPDATE containers SET update_available = ?, updated_at = datetime('now','localtime') WHERE node_id = ? AND compose_project = ? AND image = ?`, boolInt(image.UpdateAvailable), nodeID, detection.ProjectName, image.Image); err != nil {
 					return 0, err
 				}
 			} else {
-				if _, err := tx.Exec(`UPDATE containers SET update_available = 1, updated_at = datetime('now','localtime') WHERE node_id = ? AND image = ?`, nodeID, image.Image); err != nil {
+				if _, err := tx.Exec(`UPDATE containers SET update_available = ?, updated_at = datetime('now','localtime') WHERE node_id = ? AND image = ?`, boolInt(image.UpdateAvailable), nodeID, image.Image); err != nil {
 					return 0, err
 				}
 			}
@@ -694,7 +723,11 @@ func (s *Store) ClearUpdateAvailabilityForTask(task Task) error {
 			_ = tx.QueryRow(`SELECT name FROM compose_projects WHERE node_id = ? AND id = ?`, task.NodeID, task.TargetID).Scan(&projectName)
 			if _, err := tx.Exec(`
 UPDATE compose_projects
-SET update_available = 0, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime')
+SET update_available = 0,
+    checked_at = datetime('now','localtime'),
+    detection_status = 'current',
+    detection_error = '',
+    updated_at = datetime('now','localtime')
 WHERE node_id = ? AND id = ?`, task.NodeID, task.TargetID); err != nil {
 				return err
 			}
@@ -711,7 +744,7 @@ WHERE node_id = ? AND id = ?`, task.NodeID, task.TargetID); err != nil {
 			}
 		}
 	default:
-		if _, err := tx.Exec(`UPDATE compose_projects SET update_available = 0, checked_at = datetime('now','localtime'), updated_at = datetime('now','localtime') WHERE node_id = ?`, task.NodeID); err != nil {
+		if _, err := tx.Exec(`UPDATE compose_projects SET update_available = 0, checked_at = datetime('now','localtime'), detection_status = 'current', detection_error = '', updated_at = datetime('now','localtime') WHERE node_id = ?`, task.NodeID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE containers SET update_available = 0, updated_at = datetime('now','localtime') WHERE node_id = ?`, task.NodeID); err != nil {
@@ -735,7 +768,7 @@ func (s *Store) DockerState(nodeID string) (DockerState, error) {
 	if err != nil {
 		return state, err
 	}
-	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
+	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
 	if err != nil {
 		return state, err
 	}
@@ -783,8 +816,8 @@ ON CONFLICT(node_id, id) DO UPDATE SET
 
 func (s *Store) GetComposeProject(nodeID, projectID string) (ComposeProject, error) {
 	var project ComposeProject
-	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
-		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.LastSeen, &project.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
+		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
@@ -1090,7 +1123,7 @@ func scanImage(rows *sql.Rows) (Image, error) {
 
 func scanComposeProject(rows *sql.Rows) (ComposeProject, error) {
 	var project ComposeProject
-	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.LastSeen, &project.UpdatedAt)
+	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
@@ -1112,6 +1145,41 @@ func taskPayloadArg(payload, key string) string {
 	args := map[string]string{}
 	_ = json.Unmarshal([]byte(payload), &args)
 	return args[key]
+}
+
+func detectionSummary(detection protocol.UpdateDetection) (status, method, platform, message string) {
+	status = "current"
+	if detection.Error != "" {
+		status = "failed"
+		message = detection.Error
+	}
+	for _, image := range detection.Images {
+		if method == "" {
+			method = image.Method
+		}
+		if platform == "" {
+			platform = image.Platform
+		}
+		if image.UpdateAvailable {
+			if status == "failed" {
+				status = "partial"
+			} else {
+				status = "update_available"
+			}
+		}
+		if image.Error != "" && message == "" {
+			message = image.Image + ": " + image.Error
+			if status == "update_available" {
+				status = "partial"
+			} else {
+				status = "failed"
+			}
+		}
+	}
+	if len(detection.Images) == 0 && detection.Error == "" {
+		status = "checked"
+	}
+	return status, method, platform, message
 }
 
 type boolScanTarget struct {

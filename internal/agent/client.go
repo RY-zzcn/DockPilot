@@ -15,16 +15,18 @@ import (
 )
 
 type Client struct {
-	cfg     Config
-	docker  DockerClient
-	metrics MetricsCollector
-	stateMu sync.Mutex
+	cfg      Config
+	docker   DockerClient
+	detector *UpdateDetector
+	metrics  MetricsCollector
+	stateMu  sync.Mutex
 }
 
 func NewClient(cfg Config) *Client {
 	return &Client{
-		cfg:    cfg,
-		docker: DockerClient{ComposeDirs: cfg.ComposeDirs},
+		cfg:      cfg,
+		docker:   DockerClient{ComposeDirs: cfg.ComposeDirs},
+		detector: NewUpdateDetector(cfg.UpdateCacheTTL),
 	}
 }
 
@@ -175,7 +177,7 @@ func (c *Client) sendSnapshot(ctx context.Context, send func(protocol.Message) e
 }
 
 func (c *Client) handleTask(ctx context.Context, task protocol.TaskPayload, send func(protocol.Message) error) {
-	executor := TaskExecutor{Docker: c.docker}
+	executor := TaskExecutor{Docker: c.docker, Detector: c.detector}
 	logLine := func(line string) {
 		msg, _ := protocol.NewMessage(protocol.TypeTaskLog, c.cfg.NodeID, protocol.TaskLogPayload{
 			TaskID: task.ID,

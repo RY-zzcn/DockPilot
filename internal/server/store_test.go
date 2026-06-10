@@ -131,6 +131,9 @@ func TestApplyAndClearUpdateDetections(t *testing.T) {
 	if !state.ComposeProjects[0].UpdateAvailable || state.ComposeProjects[0].CheckedAt == "" {
 		t.Fatalf("compose update metadata was not set: %#v", state.ComposeProjects[0])
 	}
+	if state.ComposeProjects[0].DetectionStatus != "update_available" {
+		t.Fatalf("compose detection status was not set: %#v", state.ComposeProjects[0])
+	}
 	task := Task{
 		NodeID:     "node-1",
 		Kind:       "compose_update",
@@ -147,6 +150,73 @@ func TestApplyAndClearUpdateDetections(t *testing.T) {
 	}
 	if state.Containers[0].UpdateAvailable || state.ComposeProjects[0].UpdateAvailable {
 		t.Fatalf("update flags were not cleared: %#v %#v", state.Containers[0], state.ComposeProjects[0])
+	}
+	if state.ComposeProjects[0].DetectionStatus != "current" {
+		t.Fatalf("compose detection status was not cleared: %#v", state.ComposeProjects[0])
+	}
+}
+
+func TestFailedUpdateDetectionPreservesAvailability(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	snapshot := protocol.DockerSnapshotPayload{
+		Containers: []protocol.ContainerSnapshot{{
+			ID:             "container-1",
+			Name:           "web",
+			Image:          "nginx:stable",
+			State:          "running",
+			Status:         "Up",
+			ComposeProject: "site",
+		}},
+		ComposeProjects: []protocol.ComposeProjectSnapshot{{
+			ID:   "compose-1",
+			Name: "site",
+			Path: "/opt/site/compose.yml",
+		}},
+	}
+	if err := store.ReplaceDockerSnapshot("node-1", snapshot); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	_, err = store.ApplyUpdateDetections("node-1", []protocol.UpdateDetection{{
+		TargetType:  "compose",
+		TargetID:    "compose-1",
+		ProjectName: "site",
+		Path:        "/opt/site/compose.yml",
+		Images: []protocol.ImageUpdateDetection{{
+			Image:           "nginx:stable",
+			UpdateAvailable: true,
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("apply available detection: %v", err)
+	}
+	_, err = store.ApplyUpdateDetections("node-1", []protocol.UpdateDetection{{
+		TargetType:  "compose",
+		TargetID:    "compose-1",
+		ProjectName: "site",
+		Path:        "/opt/site/compose.yml",
+		Error:       "registry unavailable",
+		Images:      []protocol.ImageUpdateDetection{},
+	}})
+	if err != nil {
+		t.Fatalf("apply failed detection: %v", err)
+	}
+	state, err := store.DockerState("node-1")
+	if err != nil {
+		t.Fatalf("docker state: %v", err)
+	}
+	project := state.ComposeProjects[0]
+	if !project.UpdateAvailable {
+		t.Fatalf("failed detection should preserve compose availability: %#v", project)
+	}
+	if project.DetectionStatus != "failed" || project.DetectionError == "" {
+		t.Fatalf("failed detection metadata was not saved: %#v", project)
+	}
+	if !state.Containers[0].UpdateAvailable {
+		t.Fatalf("failed detection should preserve container availability: %#v", state.Containers[0])
 	}
 }
 

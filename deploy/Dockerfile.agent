@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod ./
 RUN go mod download
 COPY . .
-ARG VERSION=0.1.0
+ARG VERSION=0.2.0
 ARG COMMIT=dev
 ARG BUILD_DATE=unknown
 RUN CGO_ENABLED=0 go build -mod=mod \

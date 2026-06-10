@@ -1,4 +1,5 @@
 data/
+.tmp/
 .npm-cache/
 .ssh/
 web/dist/

@@ -85,6 +85,10 @@ export interface ComposeProject {
   version: number
   update_available: boolean
   checked_at: string
+  detection_status: string
+  detection_method: string
+  detection_platform: string
+  detection_error?: string
   last_seen: string
   updated_at: string
 }

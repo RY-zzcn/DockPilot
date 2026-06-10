@@ -13,7 +13,8 @@ import (
 )
 
 type TaskExecutor struct {
-	Docker DockerClient
+	Docker   DockerClient
+	Detector *UpdateDetector
 }
 
 func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, logLine func(string)) protocol.TaskResultPayload {
@@ -64,7 +65,8 @@ func (t TaskExecutor) detectUpdates(ctx context.Context, task protocol.TaskPaylo
 			detection, err := t.detectComposeProject(ctx, project.ID, project.Name, project.Path, logLine)
 			detections = append(detections, detection)
 			if err != nil {
-				return detections, err
+				logLine("Compose project check failed: " + err.Error())
+				continue
 			}
 		}
 		return detections, nil
@@ -74,6 +76,9 @@ func (t TaskExecutor) detectUpdates(ctx context.Context, task protocol.TaskPaylo
 		name = filepath.Base(filepath.Dir(path))
 	}
 	detection, err := t.detectComposeProject(ctx, task.TargetID, name, path, logLine)
+	if err != nil {
+		detection.Error = err.Error()
+	}
 	return []protocol.UpdateDetection{detection}, err
 }
 
@@ -87,23 +92,36 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 	}
 	images, err := composeImages(ctx, path)
 	if err != nil {
+		detection.Error = err.Error()
 		return detection, err
 	}
 	if len(images) == 0 {
 		logLine("No image references found in compose config: " + path)
 		return detection, nil
 	}
+	detector := t.Detector
+	if detector == nil {
+		detector = NewUpdateDetector(0)
+	}
+	failedImages := 0
 	for _, image := range images {
-		item := detectImageUpdate(ctx, image)
+		item := detector.Detect(ctx, image)
 		detection.Images = append(detection.Images, item)
 		switch {
+		case item.Pinned:
+			logLine(fmt.Sprintf("Image %s is digest-pinned for %s: %s", image, item.Platform, shortDigest(item.RemoteManifestDigest)))
 		case item.Error != "":
-			logLine(fmt.Sprintf("Image %s check failed: %s", image, item.Error))
+			failedImages++
+			logLine(fmt.Sprintf("Image %s check failed via %s for %s: %s", image, nonEmpty(item.Method, "unknown"), item.Platform, item.Error))
 		case item.UpdateAvailable:
-			logLine(fmt.Sprintf("Image %s has update: local %s remote %s", image, shortDigest(item.LocalDigest), shortDigest(item.RemoteDigest)))
+			logLine(fmt.Sprintf("Image %s has update via %s for %s: local %s remote %s", image, item.Method, item.Platform, shortDigest(item.LocalDigest), shortDigest(item.RemoteDigest)))
 		default:
-			logLine(fmt.Sprintf("Image %s is current: %s", image, shortDigest(nonEmpty(item.LocalDigest, item.RemoteDigest))))
+			logLine(fmt.Sprintf("Image %s is current via %s for %s: %s", image, item.Method, item.Platform, shortDigest(nonEmpty(item.LocalDigest, item.RemoteDigest))))
 		}
+	}
+	if failedImages > 0 {
+		detection.Error = fmt.Sprintf("%d image update checks failed", failedImages)
+		return detection, fmt.Errorf("%s", detection.Error)
 	}
 	return detection, nil
 }
@@ -185,15 +203,4 @@ func commandCombined(ctx context.Context, name string, args ...string) (string, 
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
-}
-
-func shortDigest(value string) string {
-	value = digestOnly(value)
-	if len(value) > 19 {
-		return value[:19]
-	}
-	if value == "" {
-		return "-"
-	}
-	return value
 }

@@ -19,6 +19,7 @@ type Config struct {
 	ComposeDirs       []string
 	MetricsInterval   time.Duration
 	SnapshotInterval  time.Duration
+	UpdateCacheTTL    time.Duration
 }
 
 type State struct {
@@ -39,6 +40,7 @@ func LoadConfig() Config {
 		ComposeDirs:       splitCSV(env("DOCKPILOT_COMPOSE_DIRS", "/opt,/srv,/var/www")),
 		MetricsInterval:   time.Duration(envInt("DOCKPILOT_METRICS_INTERVAL_SECONDS", 15)) * time.Second,
 		SnapshotInterval:  time.Duration(envInt("DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS", 60)) * time.Second,
+		UpdateCacheTTL:    time.Duration(envInt("DOCKPILOT_UPDATE_CACHE_SECONDS", 900)) * time.Second,
 	}
 	flag.StringVar(&cfg.ServerURL, "server", cfg.ServerURL, "DockPilot server URL")
 	flag.StringVar(&cfg.RegistrationToken, "registration-token", cfg.RegistrationToken, "one-time registration token")

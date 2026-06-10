@@ -25,23 +25,29 @@ jobs:
       - name: Prepare Go modules
         run: go mod tidy
 
+      - name: Verify Go modules
+        run: go mod verify
+
       - name: Go tests
         run: go test -mod=mod ./...
 
       - name: Installer syntax
         run: bash -n scripts/dockpilot-install.sh
 
+      - name: Public content check
+        run: node scripts/check-public-content.js
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: web/package.json
+          cache-dependency-path: web/package-lock.json
 
       - name: Web build
         working-directory: web
         run: |
-          npm install
+          npm ci
           npm run build
 
   docker-build:

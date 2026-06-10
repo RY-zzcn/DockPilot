@@ -141,7 +141,8 @@ go run ./cmd/agent \
 - 自动检测：Server 调度器每 `1 分钟` 扫描一次策略；真正执行频率由策略决定，支持 `@hourly`、`@daily` 和 `interval:<duration>`，例如 `interval:6h`。
 - 默认策略：没有显式保存策略时为 `manual`，不会自动检测或更新。
 - Agent 快照：Agent 默认每 `60 秒` 同步 Docker/Compose 状态，每 `15 秒` 上报心跳和基础指标。
-- 检测逻辑：Agent 对 Compose 项目运行 `docker compose config --images`，再通过本地 `docker image inspect` 与远端 `docker buildx imagetools inspect` / `docker manifest inspect --verbose` 获取 digest，比较本地和远端 digest 后回传 `update_available`。
+- 检测逻辑：Agent 对 Compose 项目运行 `docker compose config --images` 获取镜像列表，优先通过 Registry API 按节点平台读取远端 digest；失败时回退到 `docker buildx imagetools inspect` / `docker manifest inspect --verbose`。Agent 会比较本地 `docker image inspect` 与远端平台镜像的 digest，并回传 `update_available`、检测方式、平台和检测时间。
+- 固定镜像：`image@sha256:...` 形式的 digest 固定镜像会被识别为已固定版本，不会误报更新。
 - 更新逻辑：手动执行或 `automatic` 策略会运行 `docker compose pull --ignore-buildable`，随后运行 `docker compose up -d --remove-orphans`。更新成功后会清除该项目的可更新标记。
 
 ## API 概览

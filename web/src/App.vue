@@ -288,8 +288,8 @@
             >
               <strong>{{ project.name }}</strong>
               <span>{{ project.path }}</span>
-              <em v-if="project.update_available" class="mini-alert">可更新</em>
-              <em v-else-if="project.checked_at" class="mini-muted">已检测 {{ project.checked_at }}</em>
+              <em :class="detectionBadgeClass(project)">{{ detectionLabel(project) }}</em>
+              <small v-if="detectionMeta(project)">{{ detectionMeta(project) }}</small>
             </button>
           </div>
           <form class="compose-editor" @submit.prevent="saveCompose">
@@ -350,8 +350,9 @@
               <div>
                 <strong>{{ row.project.name }}</strong>
                 <span>{{ row.project.path }}</span>
-                <em v-if="row.project.update_available" class="mini-alert">可更新</em>
-                <em v-else-if="row.project.checked_at" class="mini-muted">已检测 {{ row.project.checked_at }}</em>
+                <em :class="detectionBadgeClass(row.project)">{{ detectionLabel(row.project) }}</em>
+                <small v-if="detectionMeta(row.project)">{{ detectionMeta(row.project) }}</small>
+                <small v-if="row.project.detection_error" class="error-text">{{ row.project.detection_error }}</small>
               </div>
               <div class="segmented">
                 <button :class="{ active: row.policy.mode === 'manual' }" @click="row.policy.mode = 'manual'">手动</button>
@@ -988,6 +989,25 @@ async function createUser() {
   userForm.username = ''
   userForm.password = ''
   users.value = await api.users()
+}
+
+function detectionLabel(project: ComposeProject) {
+  if (project.detection_status === 'partial') return '部分失败'
+  if (project.detection_status === 'failed') return '检测失败'
+  if (project.update_available || project.detection_status === 'update_available') return '可更新'
+  if (project.detection_status === 'checked' || project.detection_status === 'current') return '已检测'
+  if (project.checked_at) return '已检测'
+  return '未检测'
+}
+
+function detectionBadgeClass(project: ComposeProject) {
+  if (project.detection_status === 'partial' || project.detection_status === 'failed') return 'mini-danger'
+  if (project.update_available || project.detection_status === 'update_available') return 'mini-alert'
+  return 'mini-muted'
+}
+
+function detectionMeta(project: ComposeProject) {
+  return [project.detection_method, project.detection_platform, project.checked_at].filter(Boolean).join(' · ')
 }
 
 function percent(used: number, total: number) {

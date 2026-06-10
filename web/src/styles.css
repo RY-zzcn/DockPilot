@@ -176,7 +176,13 @@ textarea {
   padding: 9px 11px;
   background: rgba(5, 13, 18, 0.78);
   color: var(--text);
+  color-scheme: dark;
   outline: none;
+}
+
+select option {
+  background: var(--panel-strong);
+  color: var(--text);
 }
 
 input:focus,
@@ -566,7 +572,8 @@ small,
 }
 
 .mini-alert,
-.mini-muted {
+.mini-muted,
+.mini-danger {
   display: inline-flex;
   width: fit-content;
   max-width: 100%;
@@ -590,6 +597,16 @@ small,
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
+}
+
+.mini-danger {
+  border: 1px solid rgba(255, 107, 138, 0.3);
+  background: rgba(255, 107, 138, 0.1);
+  color: var(--rose);
+}
+
+.error-text {
+  color: var(--rose);
 }
 
 .status-dot {
