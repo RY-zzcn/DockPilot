@@ -71,13 +71,13 @@ type HeartbeatPayload struct {
 }
 
 type MetricsPayload struct {
-	CPUPercent    float64 `json:"cpu_percent"`
-	MemoryUsed    uint64  `json:"memory_used"`
-	MemoryTotal   uint64  `json:"memory_total"`
-	DiskUsed      uint64  `json:"disk_used"`
-	DiskTotal     uint64  `json:"disk_total"`
-	NetworkRx     uint64  `json:"network_rx"`
-	NetworkTx     uint64  `json:"network_tx"`
+	CPUPercent     float64 `json:"cpu_percent"`
+	MemoryUsed     uint64  `json:"memory_used"`
+	MemoryTotal    uint64  `json:"memory_total"`
+	DiskUsed       uint64  `json:"disk_used"`
+	DiskTotal      uint64  `json:"disk_total"`
+	NetworkRx      uint64  `json:"network_rx"`
+	NetworkTx      uint64  `json:"network_tx"`
 	ContainerCount int     `json:"container_count"`
 }
 
@@ -88,14 +88,14 @@ type DockerSnapshotPayload struct {
 }
 
 type ContainerSnapshot struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	Image          string            `json:"image"`
-	State          string            `json:"state"`
-	Status         string            `json:"status"`
-	ComposeProject string            `json:"compose_project,omitempty"`
-	UpdateAvailable bool             `json:"update_available,omitempty"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	Image           string            `json:"image"`
+	State           string            `json:"state"`
+	Status          string            `json:"status"`
+	ComposeProject  string            `json:"compose_project,omitempty"`
+	UpdateAvailable bool              `json:"update_available,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
 }
 
 type ImageSnapshot struct {
@@ -129,6 +129,7 @@ type ImageUpdateDetection struct {
 	Method               string `json:"method,omitempty"`
 	LocalDigest          string `json:"local_digest,omitempty"`
 	RemoteDigest         string `json:"remote_digest,omitempty"`
+	LocalManifestDigest  string `json:"local_manifest_digest,omitempty"`
 	LocalConfigDigest    string `json:"local_config_digest,omitempty"`
 	RemoteConfigDigest   string `json:"remote_config_digest,omitempty"`
 	RemoteManifestDigest string `json:"remote_manifest_digest,omitempty"`

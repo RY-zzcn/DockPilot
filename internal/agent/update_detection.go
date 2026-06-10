@@ -17,7 +17,10 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
-var digestPattern = regexp.MustCompile(`(?i)sha256:[a-f0-9]{64}`)
+var (
+	digestPattern      = regexp.MustCompile(`(?i)sha256:[a-f0-9]{64}`)
+	containerIDPattern = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
+)
 
 type commandRunner func(context.Context, string, ...string) (string, error)
 type registryLookup func(context.Context, string, platformSpec) (remoteImageInfo, error)
@@ -43,10 +46,11 @@ type platformSpec struct {
 }
 
 type localImageInfo struct {
-	ConfigDigest string
-	RepoDigests  []string
-	Platform     platformSpec
-	Missing      bool
+	ConfigDigest    string
+	RepoDigests     []string
+	ManifestDigests []string
+	Platform        platformSpec
+	Missing         bool
 }
 
 type remoteImageInfo struct {
@@ -85,7 +89,8 @@ func (d *UpdateDetector) Detect(ctx context.Context, image string) protocol.Imag
 	}
 	result.Platform = platform.String()
 	result.LocalConfigDigest = local.ConfigDigest
-	result.LocalDigest = firstDigest(local.RepoDigests, local.ConfigDigest)
+	result.LocalManifestDigest = firstDigest(local.ManifestDigests, "")
+	result.LocalDigest = firstDigest(local.ManifestDigests, firstDigest(local.RepoDigests, local.ConfigDigest))
 
 	if pinnedDigest := digestFromReference(image); pinnedDigest != "" {
 		result.Method = "pinned"
@@ -132,14 +137,59 @@ func (d *UpdateDetector) localImageInfo(ctx context.Context, image string) (loca
 		}
 	}
 	return localImageInfo{
-		ConfigDigest: digestOnly(imageInfo.ID),
-		RepoDigests:  repoDigests,
+		ConfigDigest:    digestOnly(imageInfo.ID),
+		RepoDigests:     repoDigests,
+		ManifestDigests: d.localContainerManifestDigests(ctx, image),
 		Platform: platformSpec{
 			OS:           imageInfo.OS,
 			Architecture: imageInfo.Architecture,
 			Variant:      imageInfo.Variant,
 		},
 	}, nil
+}
+
+func (d *UpdateDetector) localContainerManifestDigests(ctx context.Context, image string) []string {
+	out, err := d.command(ctx, "docker", "ps", "-aq", "--filter", "ancestor="+image)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var digests []string
+	for _, line := range strings.Split(out, "\n") {
+		containerID := strings.TrimSpace(line)
+		if !containerIDPattern.MatchString(containerID) {
+			continue
+		}
+		inspectOut, err := d.command(ctx, "docker", "container", "inspect", containerID)
+		if err != nil {
+			continue
+		}
+		for _, digest := range parseContainerManifestDigests(inspectOut) {
+			if !seen[digest] {
+				seen[digest] = true
+				digests = append(digests, digest)
+			}
+		}
+	}
+	return digests
+}
+
+func parseContainerManifestDigests(output string) []string {
+	var raw []struct {
+		ImageManifestDescriptor struct {
+			Digest string `json:"digest"`
+		} `json:"ImageManifestDescriptor"`
+	}
+	if json.Unmarshal([]byte(output), &raw) != nil {
+		return nil
+	}
+	var digests []string
+	for _, item := range raw {
+		if digest := digestOnly(item.ImageManifestDescriptor.Digest); digest != "" {
+			digests = append(digests, digest)
+		}
+	}
+	return digests
 }
 
 func (d *UpdateDetector) remoteInfo(ctx context.Context, image string, platform platformSpec) (remoteImageInfo, error) {
@@ -381,15 +431,26 @@ func updateAvailable(local localImageInfo, remote remoteImageInfo) bool {
 	if local.Missing {
 		return true
 	}
+	for _, digest := range local.ManifestDigests {
+		if digestOnly(digest) == digestOnly(remote.ManifestDigest) {
+			return false
+		}
+	}
+	if local.ConfigDigest != "" && remote.ConfigDigest != "" && digestOnly(local.ConfigDigest) == digestOnly(remote.ConfigDigest) {
+		return false
+	}
+	for _, digest := range local.RepoDigests {
+		if digestOnly(digest) == digestOnly(remote.ManifestDigest) {
+			return false
+		}
+	}
+	if len(local.ManifestDigests) > 0 && remote.ManifestDigest != "" {
+		return true
+	}
 	if local.ConfigDigest != "" && remote.ConfigDigest != "" {
-		return local.ConfigDigest != remote.ConfigDigest
+		return true
 	}
 	if remote.ManifestDigest != "" && len(local.RepoDigests) > 0 {
-		for _, digest := range local.RepoDigests {
-			if digestOnly(digest) == digestOnly(remote.ManifestDigest) {
-				return false
-			}
-		}
 		return true
 	}
 	if local.ConfigDigest == "" && (remote.ConfigDigest != "" || remote.ManifestDigest != "") {

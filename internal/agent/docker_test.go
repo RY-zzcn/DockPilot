@@ -103,6 +103,20 @@ func TestUpdateAvailable(t *testing.T) {
 	}
 }
 
+func TestUpdateAvailableUsesManifestDigestBeforeConfig(t *testing.T) {
+	local := localImageInfo{
+		ConfigDigest:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ManifestDigests: []string{"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+	}
+	remote := remoteImageInfo{
+		ConfigDigest:   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		ManifestDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+	}
+	if updateAvailable(local, remote) {
+		t.Fatalf("matching manifest digest should not need update even when config digests differ")
+	}
+}
+
 func TestRawManifestPlatformMatch(t *testing.T) {
 	raw := `{
   "schemaVersion": 2,
@@ -151,6 +165,33 @@ func TestDetectorUsesRegistryConfigDigest(t *testing.T) {
 	result := detector.Detect(context.Background(), "nginx:stable")
 	if !result.UpdateAvailable || result.Method != "registry" {
 		t.Fatalf("unexpected registry result: %#v", result)
+	}
+}
+
+func TestDetectorUsesContainerManifestDigest(t *testing.T) {
+	detector := NewUpdateDetector(time.Minute)
+	detector.command = func(ctx context.Context, name string, args ...string) (string, error) {
+		if len(args) >= 3 && args[0] == "image" && args[1] == "inspect" {
+			return `[{"Id":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","RepoDigests":["nginx@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"Os":"linux","Architecture":"amd64"}]`, nil
+		}
+		if len(args) >= 2 && args[0] == "ps" {
+			return "0123456789ab\n", nil
+		}
+		if len(args) >= 3 && args[0] == "container" && args[1] == "inspect" {
+			return `[{"ImageManifestDescriptor":{"digest":"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}}]`, nil
+		}
+		return "", errors.New("unexpected command")
+	}
+	detector.registry = func(context.Context, string, platformSpec) (remoteImageInfo, error) {
+		return remoteImageInfo{
+			ConfigDigest:   "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			ManifestDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			Method:         "registry",
+		}, nil
+	}
+	result := detector.Detect(context.Background(), "nginx:stable")
+	if result.UpdateAvailable || result.LocalManifestDigest != "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" {
+		t.Fatalf("unexpected manifest digest result: %#v", result)
 	}
 }
 
