@@ -221,7 +221,31 @@
               <strong>{{ selectedNode?.compose_version || '-' }}</strong>
               <span>最近心跳</span>
               <strong>{{ selectedNode?.last_seen || '-' }}</strong>
+              <span>备注</span>
+              <strong>{{ selectedNode?.note || '-' }}</strong>
             </div>
+            <form class="form-stack compact-form" @submit.prevent="saveNode">
+              <div class="form-grid">
+                <label>
+                  <span>节点名称</span>
+                  <input v-model="nodeForm.name" :disabled="!selectedNodeId || !isAdmin" />
+                </label>
+                <label>
+                  <span>备注</span>
+                  <input v-model="nodeForm.note" :disabled="!selectedNodeId || !isAdmin" />
+                </label>
+              </div>
+              <div class="button-row">
+                <button class="primary" :disabled="!selectedNodeId || !isAdmin">
+                  <Save :size="18" />
+                  保存节点
+                </button>
+                <button class="secondary danger-action" type="button" :disabled="!selectedNodeId || !isAdmin" @click="deleteNode">
+                  <Trash2 :size="18" />
+                  删除节点
+                </button>
+              </div>
+            </form>
             <div class="button-row">
               <button class="secondary" :disabled="!selectedNodeId || !isAdmin" @click="createNodeTask('detect_updates')">
                 <Search :size="18" />
@@ -391,7 +415,13 @@
         <section class="panel">
           <div class="panel-head">
             <h2>任务</h2>
-            <ClipboardList :size="18" />
+            <div class="button-row compact-actions">
+              <button class="secondary" :disabled="!isAdmin" @click="clearFinishedTasks">
+                <Eraser :size="18" />
+                清除历史
+              </button>
+              <ClipboardList :size="18" />
+            </div>
           </div>
           <div class="task-list">
             <button v-for="task in tasks" :key="task.id" class="task-row" @click="openTask(task)">
@@ -439,24 +469,94 @@
           </div>
           <div class="command-stack">
             <div class="command-item">
-              <span>Agent 二进制接入</span>
+              <div class="command-title">
+                <span>交互式部署/卸载</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.interactive || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
+              <div class="command-box">{{ installInfo.interactive || '-' }}</div>
+            </div>
+            <div class="command-item">
+              <div class="command-title">
+                <span>Agent 二进制接入</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.agent_binary || installInfo.binary_command)">
+                  <Copy :size="16" />
+                </button>
+              </div>
               <div class="command-box">{{ installInfo.agent_binary || installInfo.binary_command }}</div>
             </div>
             <div class="command-item">
-              <span>Agent Docker 接入</span>
+              <div class="command-title">
+                <span>Agent Docker 接入</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.agent_docker || installInfo.docker_command)">
+                  <Copy :size="16" />
+                </button>
+              </div>
               <div class="command-box">{{ installInfo.agent_docker || installInfo.docker_command }}</div>
             </div>
             <div class="command-item">
-              <span>Server Docker 部署</span>
+              <div class="command-title">
+                <span>Server Docker 部署</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.server_docker || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
               <div class="command-box">{{ installInfo.server_docker || '-' }}</div>
             </div>
             <div class="command-item">
-              <span>Server 二进制部署</span>
+              <div class="command-title">
+                <span>Server 二进制部署</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.server_binary || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
               <div class="command-box">{{ installInfo.server_binary || '-' }}</div>
             </div>
             <div class="command-item">
-              <span>卸载</span>
+              <div class="command-title">
+                <span>交互式卸载</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
               <div class="command-box">{{ installInfo.uninstall || '-' }}</div>
+            </div>
+            <div class="command-item">
+              <div class="command-title">
+                <span>仅卸载 Agent</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_agent || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
+              <div class="command-box">{{ installInfo.uninstall_agent || '-' }}</div>
+            </div>
+            <div class="command-item">
+              <div class="command-title">
+                <span>仅卸载 Server</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_server || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
+              <div class="command-box">{{ installInfo.uninstall_server || '-' }}</div>
+            </div>
+            <div class="command-item">
+              <div class="command-title">
+                <span>全部卸载</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_all || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
+              <div class="command-box">{{ installInfo.uninstall_all || '-' }}</div>
+            </div>
+            <div class="command-item">
+              <div class="command-title">
+                <span>彻底卸载</span>
+                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_purge || '')">
+                  <Copy :size="16" />
+                </button>
+              </div>
+              <div class="command-box">{{ installInfo.uninstall_purge || '-' }}</div>
             </div>
           </div>
         </section>
@@ -543,7 +643,9 @@ import {
   Box,
   ClipboardList,
   Clock3,
+  Copy,
   Cpu,
+  Eraser,
   FileCode2,
   HardDrive,
   LayoutDashboard,
@@ -644,15 +746,21 @@ const versionInfo = reactive<VersionInfo>({
 const installInfo = reactive<InstallInfo>({
   server_url: '',
   registration_token: '',
+  interactive: '',
   docker_command: '',
   binary_command: '',
   agent_docker: '',
   agent_binary: '',
   server_docker: '',
   server_binary: '',
-  uninstall: ''
+  uninstall: '',
+  uninstall_agent: '',
+  uninstall_server: '',
+  uninstall_all: '',
+  uninstall_purge: ''
 })
 
+const nodeForm = reactive({ name: '', note: '' })
 const composeForm = reactive({
   id: '',
   name: '',
@@ -780,7 +888,10 @@ watch(selectedNodeId, async (nodeId) => {
     dockerState.images = []
     dockerState.compose_projects = []
   }
+  syncNodeForm()
 })
+
+watch(selectedNode, () => syncNodeForm())
 
 async function bootstrap() {
   if (!token.value) {
@@ -872,6 +983,33 @@ async function loadDocker(nodeId: string) {
   dockerState.compose_projects = state.compose_projects
 }
 
+function syncNodeForm() {
+  nodeForm.name = selectedNode.value?.name || ''
+  nodeForm.note = selectedNode.value?.note || ''
+}
+
+async function saveNode() {
+  if (!selectedNodeId.value) return
+  const saved = await api.updateNode(selectedNodeId.value, nodeForm)
+  nodes.value = nodes.value.map((node) => (node.id === saved.id ? saved : node))
+}
+
+async function deleteNode() {
+  if (!selectedNodeId.value || !selectedNode.value) return
+  const confirmed = window.confirm(`删除节点 ${selectedNode.value.name}？如果该 Agent 仍在运行，它可能会重新注册。`)
+  if (!confirmed) return
+  const deletedID = selectedNodeId.value
+  await api.deleteNode(deletedID)
+  nodes.value = nodes.value.filter((node) => node.id !== deletedID)
+  selectedNodeId.value = nodes.value[0]?.id || ''
+  if (!selectedNodeId.value) {
+    dockerState.containers = []
+    dockerState.images = []
+    dockerState.compose_projects = []
+  }
+  await refreshAll()
+}
+
 async function createNodeTask(kind: string, targetType = '', targetId = '') {
   if (!selectedNodeId.value) return
   await api.createTask({ node_id: selectedNodeId.value, kind, target_type: targetType, target_id: targetId, args: {} })
@@ -891,6 +1029,16 @@ async function createProjectTask(kind: string, project: ComposeProject) {
 
 async function refreshTasks() {
   tasks.value = await api.tasks()
+}
+
+async function clearFinishedTasks() {
+  const confirmed = window.confirm('清除已结束的任务历史？正在运行和排队任务会保留。')
+  if (!confirmed) return
+  await api.clearTasks('finished')
+  selectedTask.value = null
+  taskLogs.value = []
+  await refreshTasks()
+  Object.assign(overview, await api.overview())
 }
 
 async function openTask(task: Task) {
@@ -989,6 +1137,22 @@ async function createUser() {
   userForm.username = ''
   userForm.password = ''
   users.value = await api.users()
+}
+
+async function copyCommand(command: string) {
+  if (!command) return
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(command)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = command
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
 }
 
 function detectionLabel(project: ComposeProject) {

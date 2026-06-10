@@ -4,11 +4,11 @@ DockPilot 是一个轻量的 Docker / Docker Compose 节点管理面板，采用
 
 ## 功能
 
-- 节点管理：在线/离线、CPU、内存、磁盘、网络、Docker/Compose 版本。
+- 节点管理：在线/离线、CPU、内存、磁盘、网络、Docker/Compose 版本、重命名、备注和删除。
 - Docker 资产：容器、镜像、Compose 项目扫描和状态同步。
 - 更新中心：手动检测、手动确认更新、定时自动、全自动策略。
 - Compose 管理：扫描已有 Compose 项目，也可在面板中托管 compose.yml 并下发部署。
-- 任务中心：任务状态、日志回传、失败原因、重试入口。
+- 任务中心：任务状态、日志回传、失败原因、重试入口和历史清理。
 - 通知渠道：Telegram、Webhook、Email。
 - 权限控制：管理员可操作，viewer 只读。
 - 北京时间：默认 `Asia/Shanghai`，面板、任务、日志、指标按北京时间展示和写入。
@@ -17,6 +17,12 @@ DockPilot 是一个轻量的 Docker / Docker Compose 节点管理面板，采用
 ## 快速部署
 
 推荐先部署 Server，再到面板设置页复制 Agent 接入命令。
+
+也可以直接进入交互式菜单：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash
+```
 
 ### 一键部署 Server
 
@@ -60,10 +66,16 @@ curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dock
 curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall
 ```
 
+只卸载 Agent：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall --target agent
+```
+
 删除程序和数据：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall --purge
+curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall --target all --purge
 ```
 
 更完整的部署、升级、离线安装和排障说明见 [docs/deployment.md](docs/deployment.md)。
@@ -149,9 +161,9 @@ go run ./cmd/agent \
 
 - `/api/auth/*`：登录、刷新、当前用户。
 - `/api/version`：Server 版本、commit、构建时间、服务时区和当前服务时间。
-- `/api/nodes/*`：节点列表和节点详情。
+- `/api/nodes/*`：节点列表、节点详情、节点重命名、备注和删除。
 - `/api/docker/*`：Docker 状态、Compose 保存。
-- `/api/tasks/*`：任务创建、状态、日志、取消。
+- `/api/tasks/*`：任务创建、状态、日志、取消和历史清理。
 - `/api/policies/*`：全局、节点、Compose、容器策略。
 - `/api/notifications/*`：Telegram、Webhook、Email 通知配置。
 - `/api/agent/ws`：Agent WebSocket 通道。

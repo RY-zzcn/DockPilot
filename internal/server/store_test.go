@@ -79,6 +79,61 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestUpdateNodePreservesCustomName(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	node, err := store.UpdateNode("node-1", "edge-prod", "primary docker host")
+	if err != nil {
+		t.Fatalf("update node: %v", err)
+	}
+	if node.Name != "edge-prod" || node.Note != "primary docker host" {
+		t.Fatalf("node metadata was not updated: %#v", node)
+	}
+	hello := testHello("node-1")
+	hello.Name = "agent-hostname"
+	node, _, err = store.UpsertNodeFromHello(hello, "node-1")
+	if err != nil {
+		t.Fatalf("upsert renamed node: %v", err)
+	}
+	if node.Name != "edge-prod" {
+		t.Fatalf("custom name was overwritten: %#v", node)
+	}
+}
+
+func TestClearFinishedTasks(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	pending, _ := store.CreateTask(Task{NodeID: "node-1", Kind: "detect_updates"})
+	success, _ := store.CreateTask(Task{NodeID: "node-1", Kind: "detect_updates"})
+	failed, _ := store.CreateTask(Task{NodeID: "node-1", Kind: "detect_updates"})
+	if err := store.FinishTask(success.ID, TaskSuccess, "{}"); err != nil {
+		t.Fatalf("finish success: %v", err)
+	}
+	if err := store.FinishTask(failed.ID, TaskFailed, "{}"); err != nil {
+		t.Fatalf("finish failed: %v", err)
+	}
+	deleted, err := store.ClearTasks("finished")
+	if err != nil {
+		t.Fatalf("clear tasks: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected two deleted tasks, got %d", deleted)
+	}
+	tasks, err := store.ListTasks(10)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != pending.ID {
+		t.Fatalf("pending task should remain: %#v", tasks)
+	}
+}
+
 func TestApplyAndClearUpdateDetections(t *testing.T) {
 	store := testStore(t)
 	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")

@@ -101,7 +101,11 @@ func (h *AgentHub) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (h *AgentHub) authenticateHello(hello protocol.HelloPayload) (Node, error) {
 	if hello.NodeID != "" && hello.NodeToken != "" {
 		if _, err := h.store.AuthenticateNode(hello.NodeID, hello.NodeToken); err != nil {
-			return Node{}, err
+			if hello.RegistrationToken == "" || hello.RegistrationToken != h.cfg.AgentRegistrationToken {
+				return Node{}, err
+			}
+			node, _, registerErr := h.store.UpsertNodeFromHello(hello, hello.NodeID)
+			return node, registerErr
 		}
 		node, _, err := h.store.UpsertNodeFromHello(hello, hello.NodeID)
 		return node, err
@@ -136,6 +140,19 @@ func (h *AgentHub) IsOnline(nodeID string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.sessions[nodeID] != nil
+}
+
+func (h *AgentHub) Disconnect(nodeID string) {
+	h.mu.Lock()
+	session := h.sessions[nodeID]
+	if session != nil {
+		delete(h.sessions, nodeID)
+	}
+	h.mu.Unlock()
+	if session != nil {
+		_ = session.conn.Close()
+		close(session.closed)
+	}
 }
 
 func (h *AgentHub) EnqueueTask(task Task) error {

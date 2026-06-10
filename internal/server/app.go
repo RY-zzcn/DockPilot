@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -131,6 +132,16 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		a.handleListNodes(w, r)
 	case strings.HasPrefix(path, "/nodes/") && r.Method == http.MethodGet:
 		a.handleGetNode(w, r, strings.TrimPrefix(path, "/nodes/"))
+	case strings.HasPrefix(path, "/nodes/") && (r.Method == http.MethodPatch || r.Method == http.MethodPut):
+		nodeID := strings.TrimPrefix(path, "/nodes/")
+		RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+			a.handleUpdateNode(w, r, nodeID)
+		})(w, r)
+	case strings.HasPrefix(path, "/nodes/") && r.Method == http.MethodDelete:
+		nodeID := strings.TrimPrefix(path, "/nodes/")
+		RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+			a.handleDeleteNode(w, r, nodeID)
+		})(w, r)
 	case path == "/docker/state" && r.Method == http.MethodGet:
 		a.handleDockerState(w, r)
 	case path == "/docker/compose" && r.Method == http.MethodPost:
@@ -139,6 +150,8 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		a.handleListTasks(w, r)
 	case path == "/tasks" && r.Method == http.MethodPost:
 		RequireAdmin(a.handleCreateTask)(w, r)
+	case path == "/tasks" && r.Method == http.MethodDelete:
+		RequireAdmin(a.handleClearTasks)(w, r)
 	case strings.HasSuffix(path, "/logs") && strings.HasPrefix(path, "/tasks/") && r.Method == http.MethodGet:
 		taskID := strings.TrimSuffix(strings.TrimPrefix(path, "/tasks/"), "/logs")
 		a.handleTaskLogs(w, r, taskID)
@@ -223,6 +236,40 @@ func (a *App) handleGetNode(w http.ResponseWriter, r *http.Request, nodeID strin
 		"online": a.hub.IsOnline(nodeID),
 		"docker": state,
 	})
+}
+
+func (a *App) handleUpdateNode(w http.ResponseWriter, r *http.Request, nodeID string) {
+	var body struct {
+		Name string `json:"name"`
+		Note string `json:"note"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	node, err := a.store.UpdateNode(nodeID, body.Name, body.Note)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "node not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, node)
+}
+
+func (a *App) handleDeleteNode(w http.ResponseWriter, r *http.Request, nodeID string) {
+	if _, err := a.store.GetNode(nodeID); err != nil {
+		writeError(w, http.StatusNotFound, "node not found")
+		return
+	}
+	a.hub.Disconnect(nodeID)
+	if err := a.store.DeleteNode(nodeID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (a *App) handleDockerState(w http.ResponseWriter, r *http.Request) {
@@ -334,6 +381,16 @@ func (a *App) handleTaskLogs(w http.ResponseWriter, r *http.Request, taskID stri
 	writeJSON(w, http.StatusOK, logs)
 }
 
+func (a *App) handleClearTasks(w http.ResponseWriter, r *http.Request) {
+	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
+	deleted, err := a.store.ClearTasks(scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+}
+
 func (a *App) handleCancelTask(w http.ResponseWriter, r *http.Request, taskID string) {
 	if err := a.store.FinishTask(taskID, TaskCanceled, `{"message":"canceled by user"}`); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -432,10 +489,16 @@ func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 	agentBinary := fmt.Sprintf("curl -fsSL %s | bash -s -- install-agent-binary --server-url %s --registration-token %s", installScript, shellArg(serverURL), shellArg(a.cfg.AgentRegistrationToken))
 	serverDocker := fmt.Sprintf("curl -fsSL %s | bash -s -- install-server-docker --public-url %s", installScript, shellArg(serverURL))
 	serverBinary := fmt.Sprintf("curl -fsSL %s | bash -s -- install-server-binary --public-url %s", installScript, shellArg(serverURL))
+	interactive := fmt.Sprintf("curl -fsSL %s | bash", installScript)
 	uninstall := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall", installScript)
+	uninstallAgent := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall --target agent", installScript)
+	uninstallServer := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall --target server", installScript)
+	uninstallAll := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall --target all", installScript)
+	uninstallPurge := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall --target all --purge", installScript)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"server_url":         serverURL,
 		"registration_token": a.cfg.AgentRegistrationToken,
+		"interactive":        interactive,
 		"docker_command":     agentDocker,
 		"binary_command":     agentBinary,
 		"agent_docker":       agentDocker,
@@ -443,6 +506,10 @@ func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 		"server_docker":      serverDocker,
 		"server_binary":      serverBinary,
 		"uninstall":          uninstall,
+		"uninstall_agent":    uninstallAgent,
+		"uninstall_server":   uninstallServer,
+		"uninstall_all":      uninstallAll,
+		"uninstall_purge":    uninstallPurge,
 	})
 }
 

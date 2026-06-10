@@ -29,6 +29,7 @@ NODE_NAME="${DOCKPILOT_NODE_NAME:-$(hostname)}"
 COMPOSE_DIRS="${DOCKPILOT_COMPOSE_DIRS:-/opt,/srv,/var/www}"
 ASSUME_YES="${DOCKPILOT_YES:-0}"
 PURGE="${DOCKPILOT_PURGE:-0}"
+TARGET="${DOCKPILOT_TARGET:-auto}"
 
 usage() {
   cat <<'EOF'
@@ -39,11 +40,13 @@ Usage:
   dockpilot-install.sh install-server-binary [--public-url URL] [--admin-password PASS] [--registration-token TOKEN] [--version VERSION]
   dockpilot-install.sh install-agent-docker --server-url URL --registration-token TOKEN [--node-name NAME]
   dockpilot-install.sh install-agent-binary --server-url URL --registration-token TOKEN [--node-name NAME] [--version VERSION]
-  dockpilot-install.sh uninstall [--purge]
+  dockpilot-install.sh uninstall [--target agent|server|all] [--purge] [--yes]
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-server-docker
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-agent-binary --server-url http://1.2.3.4:8080 --registration-token YOUR_TOKEN
+  curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall --target agent
 EOF
 }
 
@@ -86,13 +89,33 @@ ask() {
     printf '%s\n' "$default"
     return
   fi
+  input="/dev/stdin"
+  if [ -r /dev/tty ]; then
+    input="/dev/tty"
+  fi
   if [ -n "$default" ]; then
-    read -r -p "${prompt} [${default}]: " value
+    read -r -p "${prompt} [${default}]: " value <"$input"
     printf '%s\n' "${value:-$default}"
   else
-    read -r -p "${prompt}: " value
+    read -r -p "${prompt}: " value <"$input"
     printf '%s\n' "$value"
   fi
+}
+
+confirm() {
+  prompt="$1"
+  default="${2:-n}"
+  if [ "$ASSUME_YES" = "1" ]; then
+    case "$default" in
+      y|Y|yes|YES|Yes) return 0 ;;
+      *) return 1 ;;
+    esac
+  fi
+  answer="$(ask "$prompt" "$default")"
+  case "$answer" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 parse_args() {
@@ -132,6 +155,10 @@ parse_args() {
         ;;
       --version)
         VERSION="$2"
+        shift 2
+        ;;
+      --target)
+        TARGET="$2"
         shift 2
         ;;
       --yes|-y)
@@ -363,6 +390,7 @@ services:
       DOCKPILOT_REGISTRATION_TOKEN: ${DOCKPILOT_AGENT_REGISTRATION_TOKEN:-change-me-registration-token}
       DOCKPILOT_NODE_NAME: ${HOSTNAME:-local-vps}
       DOCKPILOT_COMPOSE_DIRS: /opt,/srv,/var/www
+      DOCKPILOT_UPDATE_CACHE_SECONDS: ${DOCKPILOT_UPDATE_CACHE_SECONDS:-900}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt:/opt
@@ -487,22 +515,137 @@ install_agent_binary() {
   log "agent service started"
 }
 
+docker_available() {
+  command -v docker >/dev/null 2>&1
+}
+
+container_exists() {
+  docker_available || return 1
+  docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fx "$1" >/dev/null 2>&1
+}
+
+service_exists() {
+  [ -f "/etc/systemd/system/$1.service" ] || systemctl list-unit-files "$1.service" >/dev/null 2>&1
+}
+
+server_detected() {
+  [ -x "${SERVER_ROOT}/dockpilot-server" ] || [ -f "$COMPOSE_FILE" ] || service_exists dockpilot-server || container_exists dockpilot-server
+}
+
+agent_detected() {
+  [ -x "${AGENT_ROOT}/dockpilot-agent" ] || service_exists dockpilot-agent || container_exists dockpilot-agent
+}
+
+stop_service() {
+  name="$1"
+  systemctl disable --now "$name" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/${name}.service"
+}
+
+remove_dockpilot_images() {
+  docker_available || return 0
+  docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+    | grep -E '^ghcr\.io/ry-zzcn/dockpilot-(server|agent):' \
+    | xargs -r docker image rm -f >/dev/null 2>&1 || true
+}
+
+remove_server() {
+  log "removing DockPilot server"
+  stop_service dockpilot-server
+  if docker_available; then
+    docker rm -f dockpilot-server >/dev/null 2>&1 || true
+  fi
+  rm -rf "$SERVER_ROOT"
+  rm -f "$SERVER_ENV_FILE"
+  if [ "$PURGE" = "1" ]; then
+    rm -rf "$SERVER_DATA"
+    if docker_available; then
+      docker volume rm dockpilot_dockpilot-data dockpilot-data >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+remove_agent() {
+  log "removing DockPilot agent"
+  stop_service dockpilot-agent
+  if docker_available; then
+    docker rm -f dockpilot-agent >/dev/null 2>&1 || true
+  fi
+  rm -rf "$AGENT_ROOT"
+  rm -f "$AGENT_ENV_FILE"
+  if [ "$PURGE" = "1" ]; then
+    rm -rf "$AGENT_DATA"
+    if docker_available; then
+      docker volume rm dockpilot_dockpilot-agent-state dockpilot-agent-state >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+cleanup_empty_env_dir() {
+  rmdir "$ENV_DIR" >/dev/null 2>&1 || true
+}
+
+select_uninstall_target() {
+  detected_server=0
+  detected_agent=0
+  server_detected && detected_server=1
+  agent_detected && detected_agent=1
+
+  log "deployment detection:"
+  [ "$detected_server" = "1" ] && log "- server found" || log "- server not found"
+  [ "$detected_agent" = "1" ] && log "- agent found" || log "- agent not found"
+
+  if [ "$TARGET" != "auto" ] && [ -n "$TARGET" ]; then
+    return
+  fi
+  if [ "$ASSUME_YES" = "1" ]; then
+    TARGET="all"
+    return
+  fi
+  cat <<'EOF'
+Uninstall target
+1) Agent only
+2) Server only
+3) Agent and server
+4) Cancel
+EOF
+  choice="$(ask "Choose what to remove" "3")"
+  case "$choice" in
+    1) TARGET="agent" ;;
+    2) TARGET="server" ;;
+    3) TARGET="all" ;;
+    *) die "uninstall canceled" ;;
+  esac
+}
+
 uninstall_dockpilot() {
   need_root
-  systemctl disable --now dockpilot-agent >/dev/null 2>&1 || true
-  systemctl disable --now dockpilot-server >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/dockpilot-agent.service /etc/systemd/system/dockpilot-server.service
-  systemctl daemon-reload >/dev/null 2>&1 || true
-  docker rm -f dockpilot-agent dockpilot-server >/dev/null 2>&1 || true
-  if [ -f "$COMPOSE_FILE" ]; then
-    docker compose -f "$COMPOSE_FILE" --profile agent down >/dev/null 2>&1 || true
+  select_uninstall_target
+  if [ "$PURGE" != "1" ] && confirm "Also remove data directories and Docker volumes?" "n"; then
+    PURGE=1
   fi
+  case "$TARGET" in
+    agent)
+      remove_agent
+      ;;
+    server)
+      remove_server
+      ;;
+    all|auto|"")
+      remove_agent
+      remove_server
+      ;;
+    *)
+      die "unknown uninstall target: ${TARGET}"
+      ;;
+  esac
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  cleanup_empty_env_dir
   if [ "$PURGE" = "1" ]; then
-    rm -rf "$SERVER_ROOT" "$AGENT_ROOT" "$SERVER_DATA" "$AGENT_DATA" "$ENV_DIR"
-    docker volume rm dockpilot_dockpilot-data dockpilot_dockpilot-agent-state dockpilot-data dockpilot-agent-state >/dev/null 2>&1 || true
+    remove_dockpilot_images
     log "DockPilot removed with data purge"
   else
-    log "DockPilot services removed. Data is kept in ${SERVER_DATA}, ${AGENT_DATA}, and Docker volumes."
+    log "DockPilot runtime files removed. Data directories are kept unless --purge is used."
   fi
 }
 

@@ -46,6 +46,7 @@ type Node struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
 	Token          string `json:"-"`
+	Note           string `json:"note"`
 	Version        string `json:"version"`
 	OS             string `json:"os"`
 	Arch           string `json:"arch"`
@@ -54,6 +55,7 @@ type Node struct {
 	Status         string `json:"status"`
 	LastSeen       string `json:"last_seen"`
 	Labels         string `json:"labels"`
+	NameCustom     bool   `json:"-"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
 }
@@ -218,6 +220,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   token TEXT NOT NULL UNIQUE,
+  note TEXT NOT NULL DEFAULT '',
   version TEXT NOT NULL DEFAULT '',
   os TEXT NOT NULL DEFAULT '',
   arch TEXT NOT NULL DEFAULT '',
@@ -226,6 +229,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   status TEXT NOT NULL DEFAULT 'offline',
   last_seen TEXT NOT NULL DEFAULT '',
   labels TEXT NOT NULL DEFAULT '{}',
+  name_custom INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
@@ -363,6 +367,12 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("nodes", "note", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("nodes", "name_custom", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("compose_projects", "update_available", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -489,7 +499,7 @@ func (s *Store) UpsertNodeFromHello(hello protocol.HelloPayload, fallbackID stri
 INSERT INTO nodes(id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at)
 VALUES(?,?,?,?,?,?,?,?, 'online', datetime('now','localtime'), ?, datetime('now','localtime'), datetime('now','localtime'))
 ON CONFLICT(id) DO UPDATE SET
-  name = excluded.name,
+  name = CASE WHEN nodes.name_custom = 1 THEN nodes.name ELSE excluded.name END,
   version = excluded.version,
   os = excluded.os,
   arch = excluded.arch,
@@ -512,20 +522,20 @@ ON CONFLICT(id) DO UPDATE SET
 
 func (s *Store) AuthenticateNode(nodeID, token string) (Node, error) {
 	var node Node
-	err := s.db.QueryRow(`SELECT id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at FROM nodes WHERE id = ? AND token = ?`, nodeID, token).
-		Scan(&node.ID, &node.Name, &node.Token, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.CreatedAt, &node.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes WHERE id = ? AND token = ?`, nodeID, token).
+		Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt)
 	return node, err
 }
 
 func (s *Store) GetNode(id string) (Node, error) {
 	var node Node
-	err := s.db.QueryRow(`SELECT id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at FROM nodes WHERE id = ?`, id).
-		Scan(&node.ID, &node.Name, &node.Token, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.CreatedAt, &node.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes WHERE id = ?`, id).
+		Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt)
 	return node, err
 }
 
 func (s *Store) ListNodes() ([]Node, error) {
-	rows, err := s.db.Query(`SELECT id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at FROM nodes ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -533,12 +543,50 @@ func (s *Store) ListNodes() ([]Node, error) {
 	nodes := []Node{}
 	for rows.Next() {
 		var node Node
-		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt); err != nil {
 			return nil, err
 		}
 		nodes = append(nodes, node)
 	}
 	return nodes, rows.Err()
+}
+
+func (s *Store) UpdateNode(id, name, note string) (Node, error) {
+	if strings.TrimSpace(name) == "" {
+		return Node{}, errors.New("node name is required")
+	}
+	res, err := s.db.Exec(`
+UPDATE nodes
+SET name = ?,
+    note = ?,
+    name_custom = 1,
+    updated_at = datetime('now','localtime')
+WHERE id = ?`, strings.TrimSpace(name), strings.TrimSpace(note), id)
+	if err != nil {
+		return Node{}, err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return Node{}, sql.ErrNoRows
+	}
+	return s.GetNode(id)
+}
+
+func (s *Store) DeleteNode(id string) error {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM policies WHERE (scope = 'node' AND scope_id = ?) OR (scope = 'compose' AND scope_id IN (SELECT id FROM compose_projects WHERE node_id = ?))`, id, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM compose_revisions WHERE node_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM nodes WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) MarkNodeSeen(nodeID, status string) error {
@@ -548,7 +596,7 @@ func (s *Store) MarkNodeSeen(nodeID, status string) error {
 
 func (s *Store) MarkStaleNodesOffline(timeout time.Duration) ([]Node, error) {
 	cutoff := time.Now().In(time.Local).Add(-timeout).Format("2006-01-02 15:04:05")
-	rows, err := s.db.Query(`SELECT id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at FROM nodes WHERE status = 'online' AND last_seen < ?`, cutoff)
+	rows, err := s.db.Query(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes WHERE status = 'online' AND last_seen < ?`, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +604,7 @@ func (s *Store) MarkStaleNodesOffline(timeout time.Duration) ([]Node, error) {
 	stale := []Node{}
 	for rows.Next() {
 		var node Node
-		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt); err != nil {
 			return nil, err
 		}
 		stale = append(stale, node)
@@ -915,6 +963,21 @@ func (s *Store) TaskLogs(taskID string) ([]TaskLog, error) {
 		logs = append(logs, log)
 	}
 	return logs, rows.Err()
+}
+
+func (s *Store) ClearTasks(scope string) (int64, error) {
+	where := `status IN ('success','failed','canceled')`
+	if scope == "failed" {
+		where = `status = 'failed'`
+	} else if scope == "all" {
+		where = `status NOT IN ('pending','running')`
+	}
+	res, err := s.db.Exec(`DELETE FROM tasks WHERE ` + where)
+	if err != nil {
+		return 0, err
+	}
+	deleted, _ := res.RowsAffected()
+	return deleted, nil
 }
 
 func (s *Store) ListPolicies() ([]Policy, error) {

@@ -27,6 +27,7 @@ export interface Overview {
 export interface Node {
   id: string
   name: string
+  note: string
   version: string
   os: string
   arch: string
@@ -146,6 +147,7 @@ export interface Notification {
 export interface InstallInfo {
   server_url: string
   registration_token: string
+  interactive?: string
   docker_command: string
   binary_command: string
   agent_docker?: string
@@ -153,6 +155,10 @@ export interface InstallInfo {
   server_docker?: string
   server_binary?: string
   uninstall?: string
+  uninstall_agent?: string
+  uninstall_server?: string
+  uninstall_all?: string
+  uninstall_purge?: string
 }
 
 export interface VersionInfo {

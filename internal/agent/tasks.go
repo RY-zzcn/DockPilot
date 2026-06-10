@@ -121,7 +121,6 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 	}
 	if failedImages > 0 {
 		detection.Error = fmt.Sprintf("%d image update checks failed", failedImages)
-		return detection, fmt.Errorf("%s", detection.Error)
 	}
 	return detection, nil
 }
@@ -134,7 +133,12 @@ func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPaylo
 	args := append([]string{"compose"}, composeFileArgs(path)...)
 	args = append(args, "pull", "--ignore-buildable")
 	if err := runLogged(ctx, logLine, "docker", args...); err != nil {
-		return err
+		logLine("Compose pull with --ignore-buildable failed; retrying without that flag.")
+		args = append([]string{"compose"}, composeFileArgs(path)...)
+		args = append(args, "pull")
+		if retryErr := runLogged(ctx, logLine, "docker", args...); retryErr != nil {
+			return retryErr
+		}
 	}
 	args = append([]string{"compose"}, composeFileArgs(path)...)
 	args = append(args, "up", "-d", "--remove-orphans")

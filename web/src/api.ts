@@ -58,6 +58,15 @@ export const api = {
   overview: () => request<Overview>('/api/overview'),
   nodes: async () => asArray(await request<Node[] | null>('/api/nodes')),
   node: (id: string) => request<{ node: Node; online: boolean; docker: DockerState }>(`/api/nodes/${id}`),
+  updateNode: (id: string, body: { name: string; note: string }) =>
+    request<Node>(`/api/nodes/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body)
+    }),
+  deleteNode: (id: string) =>
+    request<{ status: string }>(`/api/nodes/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
   dockerState: (nodeId: string) => request<DockerState>(`/api/docker/state?node_id=${encodeURIComponent(nodeId)}`),
   saveCompose: (body: {
     node_id: string
@@ -85,6 +94,7 @@ export const api = {
     }),
   taskLogs: async (id: string) => asArray(await request<TaskLog[] | null>(`/api/tasks/${id}/logs`)),
   cancelTask: (id: string) => request<{ status: string }>(`/api/tasks/${id}/cancel`, { method: 'POST' }),
+  clearTasks: (scope = 'finished') => request<{ deleted: number }>(`/api/tasks?scope=${encodeURIComponent(scope)}`, { method: 'DELETE' }),
   policies: async () => asArray(await request<Policy[] | null>('/api/policies')),
   savePolicy: (policy: Policy) =>
     request<Policy>('/api/policies', {

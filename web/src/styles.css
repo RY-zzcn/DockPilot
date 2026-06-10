@@ -312,6 +312,16 @@ textarea {
   box-shadow: 0 0 0 3px rgba(98, 230, 255, 0.08);
 }
 
+.danger-action {
+  border-color: rgba(255, 107, 138, 0.34);
+  color: var(--rose);
+}
+
+.danger-action:hover {
+  border-color: var(--rose);
+  box-shadow: 0 0 0 3px rgba(255, 107, 138, 0.1);
+}
+
 .icon-button {
   display: inline-grid;
   width: 40px;
@@ -733,6 +743,10 @@ td {
   gap: 12px;
 }
 
+.compact-form {
+  margin-top: 4px;
+}
+
 .policy-editor {
   display: grid;
   gap: 10px;
@@ -812,10 +826,23 @@ td {
   gap: 7px;
 }
 
+.command-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.command-title > span,
 .command-item > span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
+}
+
+.command-title .icon-button {
+  width: 32px;
+  height: 32px;
 }
 
 .command-box {
