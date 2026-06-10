@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
 	"regexp"
 	"runtime"
 	"strings"
@@ -164,7 +168,13 @@ func (d *UpdateDetector) localContainerManifestDigests(ctx context.Context, imag
 		if err != nil {
 			continue
 		}
-		for _, digest := range parseContainerManifestDigests(inspectOut) {
+		digestsForContainer := parseContainerManifestDigests(inspectOut)
+		if len(digestsForContainer) == 0 {
+			if digest := containerManifestDigestFromDockerAPI(ctx, containerID); digest != "" {
+				digestsForContainer = append(digestsForContainer, digest)
+			}
+		}
+		for _, digest := range digestsForContainer {
 			if !seen[digest] {
 				seen[digest] = true
 				digests = append(digests, digest)
@@ -174,15 +184,25 @@ func (d *UpdateDetector) localContainerManifestDigests(ctx context.Context, imag
 	return digests
 }
 
+type containerInspectDigest struct {
+	ImageManifestDescriptor struct {
+		Digest string `json:"digest"`
+	} `json:"ImageManifestDescriptor"`
+}
+
 func parseContainerManifestDigests(output string) []string {
-	var raw []struct {
-		ImageManifestDescriptor struct {
-			Digest string `json:"digest"`
-		} `json:"ImageManifestDescriptor"`
+	var raw []containerInspectDigest
+	if json.Unmarshal([]byte(output), &raw) == nil {
+		return containerManifestDigests(raw)
 	}
-	if json.Unmarshal([]byte(output), &raw) != nil {
-		return nil
+	var single containerInspectDigest
+	if json.Unmarshal([]byte(output), &single) == nil {
+		return containerManifestDigests([]containerInspectDigest{single})
 	}
+	return nil
+}
+
+func containerManifestDigests(raw []containerInspectDigest) []string {
 	var digests []string
 	for _, item := range raw {
 		if digest := digestOnly(item.ImageManifestDescriptor.Digest); digest != "" {
@@ -190,6 +210,49 @@ func parseContainerManifestDigests(output string) []string {
 		}
 	}
 	return digests
+}
+
+func containerManifestDigestFromDockerAPI(ctx context.Context, containerID string) string {
+	socketPath := dockerSocketPath()
+	if socketPath == "" {
+		return ""
+	}
+	dialer := net.Dialer{}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socketPath)
+		},
+	}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/containers/"+url.PathEscape(containerID)+"/json", nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	var inspect containerInspectDigest
+	if err := json.NewDecoder(resp.Body).Decode(&inspect); err != nil {
+		return ""
+	}
+	return digestOnly(inspect.ImageManifestDescriptor.Digest)
+}
+
+func dockerSocketPath() string {
+	host := strings.TrimSpace(os.Getenv("DOCKER_HOST"))
+	if host == "" {
+		return "/var/run/docker.sock"
+	}
+	if strings.HasPrefix(host, "unix://") {
+		return strings.TrimPrefix(host, "unix://")
+	}
+	return ""
 }
 
 func (d *UpdateDetector) remoteInfo(ctx context.Context, image string, platform platformSpec) (remoteImageInfo, error) {

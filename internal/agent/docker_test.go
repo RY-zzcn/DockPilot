@@ -76,6 +76,17 @@ redis
 	}
 }
 
+func TestParseContainerManifestDigests(t *testing.T) {
+	arrayOutput := `[{"ImageManifestDescriptor":{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]`
+	objectOutput := `{"ImageManifestDescriptor":{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}`
+	if got := parseContainerManifestDigests(arrayOutput); len(got) != 1 || got[0] != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("unexpected array manifest digests: %#v", got)
+	}
+	if got := parseContainerManifestDigests(objectOutput); len(got) != 1 || got[0] != "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("unexpected object manifest digests: %#v", got)
+	}
+}
+
 func TestDigestFromInspectOutput(t *testing.T) {
 	out := "Name: nginx:stable\nDigest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
 	got := digestFromInspectOutput(out)
