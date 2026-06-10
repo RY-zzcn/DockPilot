@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dock
 - `--registration-token`：Agent 注册 token。
 - `--admin-password`：管理员密码。
 - `--node-name`：Agent 节点名称。
-- `--version`：指定版本，例如 `v0.2.0`；默认使用 latest release。
+- `--version`：指定版本，例如 `v0.2.1`；默认使用 latest release。
 - `--target`：卸载目标，支持 `agent`、`server`、`all`。
 - `--purge`：卸载时同时删除数据。
 
@@ -162,8 +162,8 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
 从 Release 页面下载对应架构的包：
 
 ```bash
-wget https://github.com/RY-zzcn/DockPilot/releases/download/v0.2.0/dockpilot-agent_0.2.0_linux_amd64.tar.gz
-tar -xzf dockpilot-agent_0.2.0_linux_amd64.tar.gz
+wget https://github.com/RY-zzcn/DockPilot/releases/download/v0.2.1/dockpilot-agent_0.2.1_linux_amd64.tar.gz
+tar -xzf dockpilot-agent_0.2.1_linux_amd64.tar.gz
 install -m 0755 dockpilot-agent /opt/dockpilot-agent/dockpilot-agent
 ```
 
@@ -210,7 +210,7 @@ curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dock
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-agent-binary \
-  --version v0.2.0 \
+  --version v0.2.1 \
   --server-url http://YOUR_SERVER:8080 \
   --registration-token YOUR_REGISTRATION_TOKEN
 ```
