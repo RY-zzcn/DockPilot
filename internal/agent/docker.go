@@ -27,6 +27,10 @@ func (d DockerClient) ComposeVersion(ctx context.Context) string {
 	return strings.TrimSpace(commandOutput(ctx, "docker", "compose", "version", "--short"))
 }
 
+func (d DockerClient) DaemonID(ctx context.Context) string {
+	return strings.TrimSpace(commandOutput(ctx, "docker", "info", "--format", "{{.ID}}"))
+}
+
 func (d DockerClient) Snapshot(ctx context.Context) protocol.DockerSnapshotPayload {
 	containers := d.containers(ctx)
 	images := d.images(ctx)

@@ -103,6 +103,58 @@ func TestUpdateNodePreservesCustomName(t *testing.T) {
 	}
 }
 
+func TestUpsertNodeReusesOfflineDaemonID(t *testing.T) {
+	store := testStore(t)
+	hello := testHello("node-1")
+	hello.Labels = map[string]string{"docker_daemon_id": "daemon-a"}
+	node, _, err := store.UpsertNodeFromHello(hello, "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	if err := store.MarkNodeSeen(node.ID, "offline"); err != nil {
+		t.Fatalf("mark offline: %v", err)
+	}
+	rejoin := testHello("")
+	rejoin.NodeToken = ""
+	rejoin.Labels = map[string]string{"docker_daemon_id": "daemon-a"}
+	reused, _, err := store.UpsertNodeFromHello(rejoin, "")
+	if err != nil {
+		t.Fatalf("upsert rejoin: %v", err)
+	}
+	if reused.ID != node.ID {
+		t.Fatalf("expected node %s to be reused, got %s", node.ID, reused.ID)
+	}
+	nodes, err := store.ListNodes()
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected one node after rejoin, got %#v", nodes)
+	}
+}
+
+func TestUpsertNodeFallsBackToOfflineHostIdentity(t *testing.T) {
+	store := testStore(t)
+	hello := testHello("node-1")
+	node, _, err := store.UpsertNodeFromHello(hello, "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	if err := store.MarkNodeSeen(node.ID, "offline"); err != nil {
+		t.Fatalf("mark offline: %v", err)
+	}
+	rejoin := testHello("")
+	rejoin.NodeToken = ""
+	rejoin.Labels = map[string]string{"docker_daemon_id": "daemon-after-upgrade"}
+	reused, _, err := store.UpsertNodeFromHello(rejoin, "")
+	if err != nil {
+		t.Fatalf("upsert rejoin: %v", err)
+	}
+	if reused.ID != node.ID {
+		t.Fatalf("expected node %s to be reused, got %s", node.ID, reused.ID)
+	}
+}
+
 func TestClearFinishedTasks(t *testing.T) {
 	store := testStore(t)
 	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")

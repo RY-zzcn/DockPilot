@@ -120,7 +120,7 @@ Agent Docker 镜像会内置 Docker CLI、Compose v2 插件、CA 证书和时区
 Agent 升级任务会根据安装方式处理：
 
 - 二进制 + systemd：Agent 下载匹配架构的 Release 包，替换当前二进制，然后退出并由 systemd 拉起。
-- Docker：Agent 启动独立 updater 容器重拉对应版本镜像并重建 `dockpilot-agent` 容器；重建时会保留当前 Server URL、Agent state volume 和原 Docker network。
+- Docker：Agent 启动独立 updater 容器重拉对应版本镜像并重建 `dockpilot-agent` 容器；重建时会继承当前 Server URL、原 `/data` 挂载、Agent state volume 和原 Docker network，避免更新后节点身份变化。
 
 自动升级默认关闭。管理员可在设置页开启，或通过环境变量启用：
 

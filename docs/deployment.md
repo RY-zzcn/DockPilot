@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dock
 - `--registration-token`：Agent 注册 token。
 - `--admin-password`：管理员密码。
 - `--node-name`：Agent 节点名称。
-- `--version`：指定版本，例如 `v0.2.4`；默认使用 latest release。
+- `--version`：指定版本，例如 `v0.2.5`；默认使用 latest release。
 - `--target`：卸载目标，支持 `agent`、`server`、`all`。
 - `--purge`：卸载时同时删除数据。
 
@@ -166,8 +166,8 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
 从 Release 页面下载对应架构的包：
 
 ```bash
-wget https://github.com/RY-zzcn/DockPilot/releases/download/v0.2.4/dockpilot-agent_0.2.4_linux_amd64.tar.gz
-tar -xzf dockpilot-agent_0.2.4_linux_amd64.tar.gz
+wget https://github.com/RY-zzcn/DockPilot/releases/download/v0.2.5/dockpilot-agent_0.2.5_linux_amd64.tar.gz
+tar -xzf dockpilot-agent_0.2.5_linux_amd64.tar.gz
 install -m 0755 dockpilot-agent /opt/dockpilot-agent/dockpilot-agent
 ```
 
@@ -182,7 +182,7 @@ Agent 自动升级默认关闭。开启后，Server 会按 `DOCKPILOT_AGENT_AUTO
 Agent 升级任务行为：
 
 - 二进制 Agent：下载匹配系统架构的 `dockpilot-agent_<version>_<arch>.tar.gz`，替换当前二进制并退出，由 systemd 自动重启。
-- Docker Agent：启动独立 updater 容器重新创建 `dockpilot-agent` 容器，并保留当前 Server URL、已有 Agent state volume 和原 Docker network。
+- Docker Agent：启动独立 updater 容器重新创建 `dockpilot-agent` 容器，并继承当前 Server URL、原 `/data` 挂载、已有 Agent state volume 和原 Docker network，避免更新后节点身份变化。
 
 开启自动升级：
 
@@ -214,7 +214,7 @@ curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dock
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-agent-binary \
-  --version v0.2.4 \
+  --version v0.2.5 \
   --server-url http://YOUR_SERVER:8080 \
   --registration-token YOUR_REGISTRATION_TOKEN
 ```

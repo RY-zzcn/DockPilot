@@ -70,6 +70,10 @@ func (c *Client) connectOnce(ctx context.Context) error {
 		return conn.WriteJSON(msg)
 	}
 
+	labels := map[string]string{"runtime": "docker-cli"}
+	if daemonID := c.docker.DaemonID(ctx); daemonID != "" {
+		labels["docker_daemon_id"] = daemonID
+	}
 	hello := protocol.HelloPayload{
 		NodeID:            c.cfg.NodeID,
 		NodeToken:         c.cfg.NodeToken,
@@ -80,7 +84,7 @@ func (c *Client) connectOnce(ctx context.Context) error {
 		Arch:              runtime.GOARCH,
 		DockerVersion:     c.docker.DockerVersion(ctx),
 		ComposeVersion:    c.docker.ComposeVersion(ctx),
-		Labels:            map[string]string{"runtime": "docker-cli"},
+		Labels:            labels,
 	}
 	msg, _ := protocol.NewMessage(protocol.TypeHello, c.cfg.NodeID, hello)
 	if err := send(msg); err != nil {

@@ -100,6 +100,10 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 	targetImage := dockerImageRef(agentImage, targetVersion)
 	helperImage := currentContainerImage(ctx, agentImage)
 	networks := strings.Join(currentContainerNetworks(ctx), " ")
+	dataMount := currentContainerDataMount(ctx)
+	if dataMount == "" {
+		dataMount = "dockpilot-agent-state"
+	}
 	updaterName := fmt.Sprintf("dockpilot-agent-updater-%d", time.Now().UnixNano())
 	composeDirs := strings.Join(t.ComposeDirs, ",")
 	if composeDirs == "" {
@@ -120,6 +124,7 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 		"-e", "DP_SNAPSHOT_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.SnapshotInterval, 60)),
 		"-e", "DP_RELEASE_REPO=" + repo,
 		"-e", "DP_NETWORKS=" + networks,
+		"-e", "DP_DATA_MOUNT=" + dataMount,
 		helperImage,
 		"-c", dockerUpdaterScript(),
 	}
@@ -162,6 +167,7 @@ network_args=""
 if [ -n "$primary_network" ] && [ "$primary_network" != "bridge" ]; then
   network_args="--network $primary_network"
 fi
+data_mount="${DP_DATA_MOUNT:-dockpilot-agent-state}"
 docker run -d --name dockpilot-agent --restart unless-stopped \
   $network_args \
   -e TZ=Asia/Shanghai \
@@ -179,7 +185,7 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
   -v /opt:/opt \
   -v /srv:/srv \
   -v /var/www:/var/www \
-  -v dockpilot-agent-state:/data \
+  -v "$data_mount:/data" \
   "$DP_TARGET_IMAGE"
 for net in ${DP_NETWORKS:-}; do
   if [ "$net" != "$primary_network" ] && [ "$net" != "bridge" ] && [ "$net" != "host" ] && [ "$net" != "none" ]; then
@@ -219,6 +225,21 @@ func currentContainerNetworks(ctx context.Context) []string {
 		}
 	}
 	return nil
+}
+
+func currentContainerDataMount(ctx context.Context) string {
+	candidates := []string{"dockpilot-agent"}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		candidates = append([]string{hostname}, candidates...)
+	}
+	format := `{{range .Mounts}}{{if eq .Destination "/data"}}{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}`
+	for _, candidate := range candidates {
+		out, inspectErr := commandCombined(ctx, "docker", "inspect", "--format", format, candidate)
+		if inspectErr == nil && strings.TrimSpace(out) != "" {
+			return strings.TrimSpace(out)
+		}
+	}
+	return ""
 }
 
 func dockerImageRef(image, targetVersion string) string {

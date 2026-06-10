@@ -493,6 +493,13 @@ func (s *Store) UpsertNodeFromHello(hello protocol.HelloPayload, fallbackID stri
 		nodeID = fallbackID
 	}
 	if nodeID == "" {
+		if reusableID, ok, err := s.reusableNodeID(hello); err != nil {
+			return Node{}, false, err
+		} else if ok {
+			nodeID = reusableID
+		}
+	}
+	if nodeID == "" {
 		nodeID = RandomToken("node_")
 	}
 	token := hello.NodeToken
@@ -524,6 +531,44 @@ ON CONFLICT(id) DO UPDATE SET
 	}
 	node, err := s.GetNode(nodeID)
 	return node, created, err
+}
+
+func (s *Store) reusableNodeID(hello protocol.HelloPayload) (string, bool, error) {
+	rows, err := s.db.Query(`SELECT id, name, os, arch, status, labels FROM nodes ORDER BY updated_at DESC`)
+	if err != nil {
+		return "", false, err
+	}
+	defer rows.Close()
+	targetDaemonID := strings.TrimSpace(hello.Labels["docker_daemon_id"])
+	var daemonMatches []string
+	var nameMatches []string
+	for rows.Next() {
+		var id, name, osName, arch, status, labelsRaw string
+		if err := rows.Scan(&id, &name, &osName, &arch, &status, &labelsRaw); err != nil {
+			return "", false, err
+		}
+		if status == "online" {
+			continue
+		}
+		labels := map[string]string{}
+		_ = json.Unmarshal([]byte(labelsRaw), &labels)
+		if targetDaemonID != "" && labels["docker_daemon_id"] == targetDaemonID {
+			daemonMatches = append(daemonMatches, id)
+		}
+		if name == hello.Name && osName == hello.OS && arch == hello.Arch {
+			nameMatches = append(nameMatches, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", false, err
+	}
+	if len(daemonMatches) == 1 {
+		return daemonMatches[0], true, nil
+	}
+	if len(daemonMatches) == 0 && len(nameMatches) == 1 {
+		return nameMatches[0], true, nil
+	}
+	return "", false, nil
 }
 
 func (s *Store) AuthenticateNode(nodeID, token string) (Node, error) {

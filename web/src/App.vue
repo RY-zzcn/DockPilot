@@ -735,6 +735,12 @@
       </section>
     </section>
   </div>
+
+  <div class="toast-stack" aria-live="polite">
+    <div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.type">
+      {{ toast.message }}
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -787,6 +793,13 @@ import type {
 
 type ViewName = 'dashboard' | 'nodes' | 'updates' | 'tasks' | 'settings'
 type ThemeName = 'aurora' | 'graphite' | 'ember' | 'terminal'
+type ToastType = 'info' | 'success' | 'error'
+
+interface Toast {
+  id: number
+  type: ToastType
+  message: string
+}
 
 const THEME_KEY = 'dockpilot.theme'
 const themes: { value: ThemeName; label: string }[] = [
@@ -809,9 +822,12 @@ const selectedNodeId = ref('')
 const selectedTask = ref<Task | null>(null)
 const taskLogs = ref<TaskLog[]>([])
 const taskFilter = ref<'all' | 'active' | 'failed'>('all')
+const toasts = ref<Toast[]>([])
+const pendingActions = ref<string[]>([])
 const currentClock = ref('')
 let clockTimer: number | undefined
 let refreshTimer: number | undefined
+let toastID = 0
 
 const loginForm = reactive({ username: 'admin', password: 'admin' })
 const overview = reactive<Overview>({
@@ -1089,6 +1105,50 @@ function chooseTheme(value: ThemeName) {
   themeMenuOpen.value = false
 }
 
+function notify(message: string, type: ToastType = 'info') {
+  const id = ++toastID
+  toasts.value = [...toasts.value, { id, type, message }]
+  window.setTimeout(() => {
+    toasts.value = toasts.value.filter((toast) => toast.id !== id)
+  }, type === 'error' ? 5200 : 3200)
+}
+
+function isPending(key: string) {
+  return pendingActions.value.includes(key)
+}
+
+function setPending(key: string, pending: boolean) {
+  if (pending) {
+    if (!pendingActions.value.includes(key)) {
+      pendingActions.value = [...pendingActions.value, key]
+    }
+    return
+  }
+  pendingActions.value = pendingActions.value.filter((item) => item !== key)
+}
+
+async function runAction<T>(key: string, startMessage: string, successMessage: string, action: () => Promise<T>) {
+  if (isPending(key)) {
+    notify('该操作正在处理中', 'info')
+    return undefined
+  }
+  setPending(key, true)
+  error.value = ''
+  notify(startMessage, 'info')
+  try {
+    const result = await action()
+    notify(successMessage, 'success')
+    return result
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    error.value = message
+    notify(`操作失败：${message}`, 'error')
+    return undefined
+  } finally {
+    setPending(key, false)
+  }
+}
+
 async function refreshAll() {
   error.value = ''
   try {
@@ -1144,7 +1204,10 @@ function syncNodeForm() {
 
 async function saveNode() {
   if (!selectedNodeId.value) return
-  const saved = await api.updateNode(selectedNodeId.value, nodeForm)
+  const saved = await runAction('save-node', '正在保存节点信息', '节点信息已保存', () =>
+    api.updateNode(selectedNodeId.value, nodeForm)
+  )
+  if (!saved) return
   nodes.value = nodes.value.map((node) => (node.id === saved.id ? saved : node))
 }
 
@@ -1153,7 +1216,8 @@ async function deleteNode() {
   const confirmed = window.confirm(`删除节点 ${selectedNode.value.name}？如果该 Agent 仍在运行，它可能会重新注册。`)
   if (!confirmed) return
   const deletedID = selectedNodeId.value
-  await api.deleteNode(deletedID)
+  const result = await runAction('delete-node', '正在删除节点', '节点已删除', () => api.deleteNode(deletedID))
+  if (!result) return
   nodes.value = nodes.value.filter((node) => node.id !== deletedID)
   selectedNodeId.value = nodes.value[0]?.id || ''
   if (!selectedNodeId.value) {
@@ -1166,13 +1230,19 @@ async function deleteNode() {
 
 async function createNodeTask(kind: string, targetType = '', targetId = '') {
   if (!selectedNodeId.value) return
-  await api.createTask({ node_id: selectedNodeId.value, kind, target_type: targetType, target_id: targetId, args: {} })
+  const task = await runAction(`task:${selectedNodeId.value}:${kind}:${targetId}`, `正在创建任务：${taskTitle(kind)}`, `任务已创建：${taskTitle(kind)}`, () =>
+    api.createTask({ node_id: selectedNodeId.value, kind, target_type: targetType, target_id: targetId, args: {} })
+  )
+  if (!task) return
   await refreshTasks()
 }
 
 async function upgradeAgent(node?: Node) {
   if (!node) return
-  await createAgentUpdateTask(node)
+  const task = await runAction(`agent-update:${node.id}`, `正在创建 ${node.name} 的 Agent 升级任务`, 'Agent 升级任务已创建', () =>
+    createAgentUpdateTask(node)
+  )
+  if (!task) return
   await refreshTasks()
 }
 
@@ -1181,9 +1251,13 @@ async function upgradeOutdatedAgents() {
   if (targets.length === 0) return
   const confirmed = window.confirm(`为 ${targets.length} 个落后节点创建 Agent 升级任务？`)
   if (!confirmed) return
-  for (const node of targets) {
-    await createAgentUpdateTask(node)
-  }
+  const created = await runAction('agent-update-batch', '正在创建批量 Agent 升级任务', '批量升级任务已创建', async () => {
+    for (const node of targets) {
+      await createAgentUpdateTask(node)
+    }
+    return true
+  })
+  if (!created) return
   await refreshTasks()
 }
 
@@ -1198,13 +1272,16 @@ function createAgentUpdateTask(node: Node) {
 }
 
 async function createProjectTask(kind: string, project: ComposeProject) {
-  await api.createTask({
-    node_id: project.node_id,
-    kind,
-    target_type: 'compose',
-    target_id: project.id,
-    args: { path: project.path, name: project.name }
-  })
+  const task = await runAction(`project-task:${project.id}:${kind}`, `正在创建 ${project.name} 的${taskTitle(kind)}任务`, `任务已创建：${project.name}`, () =>
+    api.createTask({
+      node_id: project.node_id,
+      kind,
+      target_type: 'compose',
+      target_id: project.id,
+      args: { path: project.path, name: project.name }
+    })
+  )
+  if (!task) return
   await refreshTasks()
 }
 
@@ -1215,7 +1292,8 @@ async function refreshTasks() {
 async function clearTasksScope(scope: 'finished' | 'failed', label: string) {
   const confirmed = window.confirm(`清除${label}？正在运行和排队任务会保留。`)
   if (!confirmed) return
-  await api.clearTasks(scope)
+  const result = await runAction(`clear-tasks:${scope}`, `正在清除${label}`, `${label}已清除`, () => api.clearTasks(scope))
+  if (!result) return
   selectedTask.value = null
   taskLogs.value = []
   await refreshTasks()
@@ -1246,14 +1324,17 @@ function newCompose() {
 
 async function saveCompose() {
   if (!selectedNodeId.value) return
-  await api.saveCompose({
-    node_id: selectedNodeId.value,
-    id: composeForm.id || undefined,
-    name: composeForm.name,
-    path: composeForm.path,
-    content: composeForm.content,
-    deploy_now: composeForm.deploy_now
-  })
+  const saved = await runAction('save-compose', composeForm.deploy_now ? '正在保存并创建部署任务' : '正在保存 Compose', composeForm.deploy_now ? 'Compose 已保存，部署任务已创建' : 'Compose 已保存', () =>
+    api.saveCompose({
+      node_id: selectedNodeId.value,
+      id: composeForm.id || undefined,
+      name: composeForm.name,
+      path: composeForm.path,
+      content: composeForm.content,
+      deploy_now: composeForm.deploy_now
+    })
+  )
+  if (!saved) return
   await loadDocker(selectedNodeId.value)
   await refreshTasks()
 }
@@ -1288,16 +1369,20 @@ function syncPolicyDrafts() {
 }
 
 async function savePolicy(policy: Policy) {
-  const saved = await api.savePolicy(policy)
+  const saved = await runAction(`policy:${policy.scope}:${policy.scope_id}`, '正在保存策略', '策略已保存', () => api.savePolicy(policy))
+  if (!saved) return
   policyDrafts[policyKey(saved.scope, saved.scope_id)] = { ...saved }
   policies.value = await api.policies()
 }
 
 async function saveRuntimeSettings() {
-  const saved = await api.saveRuntimeSettings({
-    agent_auto_update: runtimeSettings.agent_auto_update,
-    agent_auto_update_version: runtimeSettings.agent_auto_update_version || 'latest'
-  })
+  const saved = await runAction('runtime-settings', '正在保存运行设置', '运行设置已保存', () =>
+    api.saveRuntimeSettings({
+      agent_auto_update: runtimeSettings.agent_auto_update,
+      agent_auto_update_version: runtimeSettings.agent_auto_update_version || 'latest'
+    })
+  )
+  if (!saved) return
   Object.assign(runtimeSettings, saved)
   versionInfo.settings = { ...saved }
 }
@@ -1318,12 +1403,14 @@ function setNotificationTemplate() {
 }
 
 async function saveNotification() {
-  await api.saveNotification(notificationForm)
+  const saved = await runAction('notification', '正在保存通知渠道', '通知渠道已保存', () => api.saveNotification(notificationForm))
+  if (!saved) return
   notifications.value = await api.notifications()
 }
 
 async function createUser() {
-  await api.createUser(userForm)
+  const created = await runAction('create-user', '正在创建用户', '用户已创建', () => api.createUser(userForm))
+  if (!created) return
   userForm.username = ''
   userForm.password = ''
   users.value = await api.users()
@@ -1331,18 +1418,25 @@ async function createUser() {
 
 async function copyCommand(command: string) {
   if (!command) return
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(command)
-    return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(command)
+      notify('命令已复制', 'success')
+      return
+    }
+    const textarea = document.createElement('textarea')
+    textarea.value = command
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    textarea.remove()
+    notify('命令已复制', 'success')
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    notify(`复制失败：${message}`, 'error')
   }
-  const textarea = document.createElement('textarea')
-  textarea.value = command
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  textarea.remove()
 }
 
 function detectionLabel(project: ComposeProject) {
@@ -1372,6 +1466,18 @@ function taskMessage(task: Task) {
   } catch {
     return ''
   }
+}
+
+function taskTitle(kind: string) {
+  const titles: Record<string, string> = {
+    detect_updates: '检测更新',
+    compose_update: '执行更新',
+    compose_deploy: '部署 Compose',
+    restart_container: '重启容器',
+    prune_images: '清理镜像',
+    agent_update: '升级 Agent'
+  }
+  return titles[kind] || kind
 }
 
 function agentCanUpdate(node?: Node) {
