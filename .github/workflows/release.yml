@@ -176,12 +176,15 @@ jobs:
           merge-multiple: true
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: DockPilot ${{ steps.vars.outputs.tag }}
-          files: dist/*.tar.gz
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "${TAG}" dist/*.tar.gz \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "DockPilot ${TAG}" \
+            --generate-notes
 
   publish-images:
     name: Publish GHCR images
