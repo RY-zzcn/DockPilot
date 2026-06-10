@@ -53,3 +53,4 @@ services:
 volumes:
   dockpilot-data:
   dockpilot-agent-state:
+    name: ${DOCKPILOT_AGENT_STATE_VOLUME:-dockpilot-agent-state}
