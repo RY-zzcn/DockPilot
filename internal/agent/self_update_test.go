@@ -22,3 +22,16 @@ func TestDockerImageRef(t *testing.T) {
 		})
 	}
 }
+
+func TestUniqueFields(t *testing.T) {
+	got := uniqueFields("deploy_default bridge deploy_default\ncustom")
+	want := []string{"deploy_default", "bridge", "custom"}
+	if len(got) != len(want) {
+		t.Fatalf("uniqueFields length = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("uniqueFields[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

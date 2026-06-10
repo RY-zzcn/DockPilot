@@ -99,6 +99,7 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 	}
 	targetImage := dockerImageRef(agentImage, targetVersion)
 	helperImage := currentContainerImage(ctx, agentImage)
+	networks := strings.Join(currentContainerNetworks(ctx), " ")
 	updaterName := fmt.Sprintf("dockpilot-agent-updater-%d", time.Now().UnixNano())
 	composeDirs := strings.Join(t.ComposeDirs, ",")
 	if composeDirs == "" {
@@ -118,6 +119,7 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 		"-e", "DP_METRICS_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.MetricsInterval, 15)),
 		"-e", "DP_SNAPSHOT_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.SnapshotInterval, 60)),
 		"-e", "DP_RELEASE_REPO=" + repo,
+		"-e", "DP_NETWORKS=" + networks,
 		helperImage,
 		"-c", dockerUpdaterScript(),
 	}
@@ -142,7 +144,26 @@ func dockerUpdaterScript() string {
 set -eu
 docker pull "$DP_TARGET_IMAGE"
 docker rm -f dockpilot-agent >/dev/null 2>&1 || true
+primary_network=""
+for net in ${DP_NETWORKS:-}; do
+  case "$net" in
+    bridge|host|none) continue ;;
+  esac
+  primary_network="$net"
+  break
+done
+if [ -z "$primary_network" ]; then
+  for net in ${DP_NETWORKS:-}; do
+    primary_network="$net"
+    break
+  done
+fi
+network_args=""
+if [ -n "$primary_network" ] && [ "$primary_network" != "bridge" ]; then
+  network_args="--network $primary_network"
+fi
 docker run -d --name dockpilot-agent --restart unless-stopped \
+  $network_args \
   -e TZ=Asia/Shanghai \
   -e DOCKPILOT_SERVER_URL="$DP_SERVER_URL" \
   -e DOCKPILOT_REGISTRATION_TOKEN="$DP_REGISTRATION_TOKEN" \
@@ -160,6 +181,11 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
   -v /var/www:/var/www \
   -v dockpilot-agent-state:/data \
   "$DP_TARGET_IMAGE"
+for net in ${DP_NETWORKS:-}; do
+  if [ "$net" != "$primary_network" ] && [ "$net" != "bridge" ] && [ "$net" != "host" ] && [ "$net" != "none" ]; then
+    docker network connect "$net" dockpilot-agent >/dev/null 2>&1 || true
+  fi
+done
 `)
 }
 
@@ -175,6 +201,24 @@ func currentContainerImage(ctx context.Context, fallback string) string {
 		}
 	}
 	return dockerImageRef(nonEmpty(fallback, defaultAgentImage), "latest")
+}
+
+func currentContainerNetworks(ctx context.Context) []string {
+	candidates := []string{"dockpilot-agent"}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		candidates = append([]string{hostname}, candidates...)
+	}
+	for _, candidate := range candidates {
+		out, inspectErr := commandCombined(ctx, "docker", "inspect", "--format", "{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}", candidate)
+		if inspectErr != nil {
+			continue
+		}
+		networks := uniqueFields(out)
+		if len(networks) > 0 {
+			return networks
+		}
+	}
+	return nil
 }
 
 func dockerImageRef(image, targetVersion string) string {
@@ -200,6 +244,19 @@ func imageBase(ref string) string {
 		return ref[:colon]
 	}
 	return ref
+}
+
+func uniqueFields(value string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, field := range strings.Fields(value) {
+		if seen[field] {
+			continue
+		}
+		seen[field] = true
+		out = append(out, field)
+	}
+	return out
 }
 
 func durationSeconds(value time.Duration, fallback int) int {
