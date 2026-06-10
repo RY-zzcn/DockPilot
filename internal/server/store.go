@@ -699,6 +699,37 @@ ON CONFLICT(node_id, id) DO UPDATE SET
 			return err
 		}
 	}
+	if len(snapshot.ComposeProjects) > 0 {
+		seenProjects := map[string]bool{}
+		for _, project := range snapshot.ComposeProjects {
+			seenProjects[project.ID] = true
+		}
+		rows, err := tx.Query(`SELECT id FROM compose_projects WHERE node_id = ? AND managed = 0`, nodeID)
+		if err != nil {
+			return err
+		}
+		var stale []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			if !seenProjects[id] {
+				stale = append(stale, id)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		for _, id := range stale {
+			if _, err := tx.Exec(`DELETE FROM compose_projects WHERE node_id = ? AND id = ? AND managed = 0`, nodeID, id); err != nil {
+				return err
+			}
+		}
+	}
 	return tx.Commit()
 }
 

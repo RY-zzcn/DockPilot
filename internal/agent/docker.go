@@ -209,7 +209,42 @@ func composeFileArgs(path string) []string {
 	if path == "" {
 		return nil
 	}
-	return []string{"-f", path}
+	file := composeFilePath(path)
+	return []string{"--project-directory", composeProjectDir(file), "-f", file}
+}
+
+func composeProjectDir(path string) string {
+	if path == "" {
+		return "."
+	}
+	info, err := os.Stat(path)
+	if err == nil && info.IsDir() {
+		return path
+	}
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			return abs
+		}
+	}
+	return dir
+}
+
+func composeFilePath(path string) string {
+	if path == "" {
+		return path
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return path
+	}
+	for _, name := range []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"} {
+		candidate := filepath.Join(path, name)
+		if stat, statErr := os.Stat(candidate); statErr == nil && !stat.IsDir() {
+			return candidate
+		}
+	}
+	return path
 }
 
 func commandTimeout() time.Duration {

@@ -89,7 +89,7 @@ func (t TaskExecutor) updateBinaryAgent(ctx context.Context, repo, targetVersion
 }
 
 func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protocol.TaskPayload, repo, targetVersion string, logLine func(string)) error {
-	serverURL := nonEmpty(task.Args["server_url"], t.ServerURL)
+	serverURL := nonEmpty(t.ServerURL, task.Args["server_url"])
 	registrationToken := nonEmpty(task.Args["registration_token"], t.RegistrationToken)
 	nodeName := nonEmpty(task.Args["node_name"], t.NodeName)
 	agentImage := nonEmpty(task.Args["agent_image"], t.AgentImage)

@@ -394,7 +394,7 @@ services:
     env_file:
       - .env
     environment:
-      DOCKPILOT_SERVER_URL: ${DOCKPILOT_PUBLIC_URL:-http://server:8080}
+      DOCKPILOT_SERVER_URL: ${DOCKPILOT_LOCAL_AGENT_SERVER_URL:-http://server:8080}
       DOCKPILOT_REGISTRATION_TOKEN: ${DOCKPILOT_AGENT_REGISTRATION_TOKEN:-change-me-registration-token}
       DOCKPILOT_NODE_NAME: ${HOSTNAME:-local-vps}
       DOCKPILOT_COMPOSE_DIRS: /opt,/srv,/var/www
@@ -499,6 +499,22 @@ install_agent_docker() {
     *) die "Agent Docker images currently support linux_amd64 and linux_arm64. Use install-agent-binary on ${suffix}." ;;
   esac
   ensure_docker
+  network_args=()
+  if [ -z "$SERVER_URL" ] && ! container_exists dockpilot-server; then
+    SERVER_URL="$(ask "Server URL" "")"
+  fi
+  if container_exists dockpilot-server; then
+    server_network="$(container_primary_network dockpilot-server)"
+    if [ -n "$server_network" ]; then
+      SERVER_URL="http://dockpilot-server:8080"
+      network_args=(--network "$server_network")
+      log "local DockPilot server container detected; agent will join network ${server_network}"
+    fi
+  elif is_loopback_url "$SERVER_URL"; then
+    SERVER_URL="$(rewrite_loopback_for_container "$SERVER_URL")"
+    network_args=(--add-host "host.docker.internal:host-gateway")
+    log "loopback server URL detected; agent will use ${SERVER_URL} from inside the container"
+  fi
   write_agent_env docker
   image_tag="latest"
   if [ "$VERSION" != "latest" ]; then
@@ -506,6 +522,7 @@ install_agent_docker() {
   fi
   docker rm -f dockpilot-agent >/dev/null 2>&1 || true
   docker run -d --name dockpilot-agent --restart unless-stopped \
+    "${network_args[@]}" \
     --env-file "$AGENT_ENV_FILE" \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /opt:/opt \
@@ -545,6 +562,32 @@ docker_available() {
 container_exists() {
   docker_available || return 1
   docker ps -a --format '{{.Names}}' 2>/dev/null | grep -Fx "$1" >/dev/null 2>&1
+}
+
+container_primary_network() {
+  name="$1"
+  docker_available || return 0
+  docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$name" 2>/dev/null \
+    | awk '$0 !~ /^(bridge|host|none)$/ { print; exit }'
+}
+
+is_loopback_url() {
+  case "$1" in
+    http://127.0.0.1*|https://127.0.0.1*|http://localhost*|https://localhost*|http://[::1]*|https://[::1]*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+rewrite_loopback_for_container() {
+  value="$1"
+  value="${value//\/\/127.0.0.1/\/\/host.docker.internal}"
+  value="${value//\/\/localhost/\/\/host.docker.internal}"
+  value="${value//\/\/[::1]/\/\/host.docker.internal}"
+  printf '%s' "$value"
 }
 
 service_exists() {

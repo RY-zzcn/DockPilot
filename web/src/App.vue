@@ -70,14 +70,23 @@
             <span>{{ currentClock }}</span>
             <small>北京时间</small>
           </div>
-          <label class="theme-select" title="界面主题">
-            <Palette :size="16" />
-            <select v-model="themeName">
-              <option v-for="theme in themes" :key="theme.value" :value="theme.value">
+          <div class="theme-picker" title="界面主题">
+            <button class="theme-trigger" type="button" @click="themeMenuOpen = !themeMenuOpen">
+              <Palette :size="16" />
+              <span>{{ currentThemeLabel }}</span>
+            </button>
+            <div v-if="themeMenuOpen" class="theme-menu">
+              <button
+                v-for="theme in themes"
+                :key="theme.value"
+                type="button"
+                :class="{ active: theme.value === themeName }"
+                @click="chooseTheme(theme.value)"
+              >
                 {{ theme.label }}
-              </option>
-            </select>
-          </label>
+              </button>
+            </div>
+          </div>
           <select v-model="selectedNodeId" title="选择节点">
             <option value="">全部节点</option>
             <option v-for="node in nodes" :key="node.id" :value="node.id">
@@ -427,17 +436,27 @@
           <div class="panel-head">
             <h2>任务</h2>
             <div class="button-row compact-actions">
-              <button class="secondary" :disabled="!isAdmin" @click="clearFinishedTasks">
+              <button class="secondary" :disabled="!isAdmin" @click="clearTasksScope('failed', '失败任务')">
+                <Eraser :size="18" />
+                清除失败
+              </button>
+              <button class="secondary" :disabled="!isAdmin" @click="clearTasksScope('finished', '已结束任务')">
                 <Eraser :size="18" />
                 清除历史
               </button>
               <ClipboardList :size="18" />
             </div>
           </div>
+          <div class="segmented task-filter">
+            <button :class="{ active: taskFilter === 'all' }" @click="taskFilter = 'all'">全部</button>
+            <button :class="{ active: taskFilter === 'active' }" @click="taskFilter = 'active'">运行中</button>
+            <button :class="{ active: taskFilter === 'failed' }" @click="taskFilter = 'failed'">失败</button>
+          </div>
           <div class="task-list">
-            <button v-for="task in tasks" :key="task.id" class="task-row" @click="openTask(task)">
+            <button v-for="task in visibleTasks" :key="task.id" class="task-row" @click="openTask(task)">
               <span class="badge" :class="task.status">{{ task.status }}</span>
               <span>{{ task.kind }}</span>
+              <small>{{ taskMessage(task) || task.target_id || '-' }}</small>
               <small>{{ task.created_at }}</small>
               <small>{{ task.node_id }}</small>
             </button>
@@ -783,11 +802,13 @@ const activeView = ref<ViewName>('dashboard')
 const themeName = ref<ThemeName>(
   themes.some((theme) => theme.value === savedTheme) ? (savedTheme as ThemeName) : 'aurora'
 )
+const themeMenuOpen = ref(false)
 const busy = ref(false)
 const error = ref('')
 const selectedNodeId = ref('')
 const selectedTask = ref<Task | null>(null)
 const taskLogs = ref<TaskLog[]>([])
+const taskFilter = ref<'all' | 'active' | 'failed'>('all')
 const currentClock = ref('')
 let clockTimer: number | undefined
 let refreshTimer: number | undefined
@@ -875,6 +896,7 @@ const memoryPercent = computed(() => percent(overview.last_metric.memory_used, o
 const diskPercent = computed(() => percent(overview.last_metric.disk_used, overview.last_metric.disk_total))
 const shortCommit = computed(() => (versionInfo.commit && versionInfo.commit !== 'dev' ? versionInfo.commit.slice(0, 12) : versionInfo.commit || '-'))
 const latestReleaseVersion = computed(() => versionInfo.release?.latest_version || '')
+const currentThemeLabel = computed(() => themes.find((theme) => theme.value === themeName.value)?.label || '主题')
 const agentTargetVersion = computed(() => {
   const configured = runtimeSettings.agent_auto_update_version || 'latest'
   if (configured === 'latest') {
@@ -912,6 +934,15 @@ const composePolicyRows = computed(() =>
     policy: policyDraftFor('compose', project.id)
   }))
 )
+const visibleTasks = computed(() => {
+  if (taskFilter.value === 'failed') {
+    return tasks.value.filter((task) => task.status === 'failed')
+  }
+  if (taskFilter.value === 'active') {
+    return tasks.value.filter((task) => task.status === 'pending' || task.status === 'running')
+  }
+  return tasks.value
+})
 const selectedTaskLogs = computed(() => {
   if (!selectedTask.value) {
     return '选择一个任务查看日志'
@@ -1053,6 +1084,11 @@ function logout() {
   user.value = null
 }
 
+function chooseTheme(value: ThemeName) {
+  themeName.value = value
+  themeMenuOpen.value = false
+}
+
 async function refreshAll() {
   error.value = ''
   try {
@@ -1176,10 +1212,10 @@ async function refreshTasks() {
   tasks.value = await api.tasks()
 }
 
-async function clearFinishedTasks() {
-  const confirmed = window.confirm('清除已结束的任务历史？正在运行和排队任务会保留。')
+async function clearTasksScope(scope: 'finished' | 'failed', label: string) {
+  const confirmed = window.confirm(`清除${label}？正在运行和排队任务会保留。`)
   if (!confirmed) return
-  await api.clearTasks('finished')
+  await api.clearTasks(scope)
   selectedTask.value = null
   taskLogs.value = []
   await refreshTasks()
@@ -1326,6 +1362,16 @@ function detectionBadgeClass(project: ComposeProject) {
 
 function detectionMeta(project: ComposeProject) {
   return [project.detection_method, project.detection_platform, project.checked_at].filter(Boolean).join(' · ')
+}
+
+function taskMessage(task: Task) {
+  if (!task.result) return ''
+  try {
+    const result = JSON.parse(task.result) as { message?: string }
+    return result.message || ''
+  } catch {
+    return ''
+  }
 }
 
 function agentCanUpdate(node?: Node) {

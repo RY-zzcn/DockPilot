@@ -182,9 +182,7 @@ textarea {
 
 select,
 select option,
-select optgroup,
-.theme-select select,
-.theme-select select option {
+select optgroup {
   background: var(--panel-strong);
   color: var(--text);
 }
@@ -387,25 +385,58 @@ textarea {
   color: var(--muted);
 }
 
-.theme-select {
+.theme-picker {
+  position: relative;
+}
+
+.theme-trigger {
   display: inline-flex;
   align-items: center;
+  min-width: 128px;
   min-height: 40px;
+  justify-content: flex-start;
   gap: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 0 8px;
+  padding: 0 10px;
   background: rgba(12, 26, 34, 0.82);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.theme-trigger svg {
   color: var(--cyan);
 }
 
-.theme-select select {
-  width: 108px;
+.theme-menu {
+  display: grid;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 150px;
+  gap: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.theme-menu button {
   min-height: 34px;
-  border: 0;
-  padding: 5px 4px;
+  border-radius: 6px;
+  padding: 6px 10px;
   background: transparent;
-  color: var(--text);
+  color: var(--muted);
+  font-weight: 900;
+  text-align: left;
+}
+
+.theme-menu button:hover,
+.theme-menu button.active {
+  background: rgba(98, 230, 255, 0.11);
+  color: var(--cyan);
 }
 
 .view-stack {
@@ -561,7 +592,7 @@ textarea {
 }
 
 .task-row {
-  grid-template-columns: auto minmax(120px, 1fr) auto auto;
+  grid-template-columns: auto minmax(110px, 0.9fr) minmax(160px, 1.2fr) auto auto;
 }
 
 .node-row.selected,
@@ -817,6 +848,10 @@ td {
   min-width: 0;
 }
 
+.task-filter {
+  width: min(360px, 100%);
+}
+
 .compact-actions {
   flex-wrap: nowrap;
 }
@@ -975,11 +1010,17 @@ td {
     width: 100%;
   }
 
-  .theme-select {
+  .theme-picker {
     width: 100%;
   }
 
-  .theme-select select {
+  .theme-trigger {
+    width: 100%;
+  }
+
+  .theme-menu {
+    left: 0;
+    right: auto;
     width: 100%;
   }
 
@@ -992,7 +1033,7 @@ td {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .task-row small:last-child {
+  .task-row small {
     display: none;
   }
 }

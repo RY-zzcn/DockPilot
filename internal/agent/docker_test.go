@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -22,6 +24,35 @@ func TestParseLabels(t *testing.T) {
 	labels := parseLabels("com.docker.compose.project=blog,env=prod")
 	if labels["com.docker.compose.project"] != "blog" || labels["env"] != "prod" {
 		t.Fatalf("unexpected labels: %#v", labels)
+	}
+}
+
+func TestComposeFileArgsUseProjectDirectory(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "compose.yml")
+	if err := os.WriteFile(file, []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := composeFileArgs(file)
+	want := []string{"--project-directory", root, "-f", file}
+	if len(args) != len(want) {
+		t.Fatalf("composeFileArgs length = %d, want %d: %#v", len(args), len(want), args)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("composeFileArgs[%d] = %q, want %q", i, args[i], want[i])
+		}
+	}
+}
+
+func TestComposeFilePathAcceptsDirectory(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "docker-compose.yml")
+	if err := os.WriteFile(file, []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := composeFilePath(root); got != file {
+		t.Fatalf("composeFilePath(%q) = %q, want %q", root, got, file)
 	}
 }
 

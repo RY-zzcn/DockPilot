@@ -33,7 +33,7 @@ services:
       - agent
     environment:
       TZ: Asia/Shanghai
-      DOCKPILOT_SERVER_URL: ${DOCKPILOT_PUBLIC_URL:-http://server:8080}
+      DOCKPILOT_SERVER_URL: ${DOCKPILOT_LOCAL_AGENT_SERVER_URL:-http://server:8080}
       DOCKPILOT_REGISTRATION_TOKEN: ${DOCKPILOT_AGENT_REGISTRATION_TOKEN:-change-me-registration-token}
       DOCKPILOT_NODE_NAME: ${HOSTNAME:-local-vps}
       DOCKPILOT_COMPOSE_DIRS: /opt,/srv,/var/www
