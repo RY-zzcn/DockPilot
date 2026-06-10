@@ -184,8 +184,13 @@ func (c *Client) handleTask(ctx context.Context, task protocol.TaskPayload, send
 		ServerURL:         c.cfg.ServerURL,
 		RegistrationToken: c.cfg.RegistrationToken,
 		NodeName:          c.cfg.Name,
+		ComposeDirs:       c.cfg.ComposeDirs,
+		MetricsInterval:   c.cfg.MetricsInterval,
+		SnapshotInterval:  c.cfg.SnapshotInterval,
+		UpdateCacheTTL:    c.cfg.UpdateCacheTTL,
 		InstallMode:       c.cfg.InstallMode,
 		ReleaseRepo:       c.cfg.ReleaseRepo,
+		AgentImage:        c.cfg.AgentImage,
 	}
 	logLine := func(line string) {
 		msg, _ := protocol.NewMessage(protocol.TypeTaskLog, c.cfg.NodeID, protocol.TaskLogPayload{

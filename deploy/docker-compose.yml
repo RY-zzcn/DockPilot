@@ -40,6 +40,7 @@ services:
       DOCKPILOT_UPDATE_CACHE_SECONDS: ${DOCKPILOT_UPDATE_CACHE_SECONDS:-900}
       DOCKPILOT_INSTALL_MODE: docker
       DOCKPILOT_RELEASE_REPO: ${DOCKPILOT_RELEASE_REPO:-RY-zzcn/DockPilot}
+      DOCKPILOT_AGENT_IMAGE: ${DOCKPILOT_AGENT_IMAGE:-ghcr.io/ry-zzcn/dockpilot-agent}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt:/opt

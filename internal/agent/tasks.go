@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/dockpilot/dockpilot/internal/protocol"
 )
@@ -18,8 +19,13 @@ type TaskExecutor struct {
 	ServerURL         string
 	RegistrationToken string
 	NodeName          string
+	ComposeDirs       []string
+	MetricsInterval   time.Duration
+	SnapshotInterval  time.Duration
+	UpdateCacheTTL    time.Duration
 	InstallMode       string
 	ReleaseRepo       string
+	AgentImage        string
 }
 
 func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, logLine func(string)) protocol.TaskResultPayload {

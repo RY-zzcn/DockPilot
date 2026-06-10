@@ -19,7 +19,10 @@ import (
 	"github.com/dockpilot/dockpilot/internal/version"
 )
 
-const defaultInstallScript = "https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh"
+const (
+	defaultInstallScript = "https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh"
+	defaultAgentImage    = "ghcr.io/ry-zzcn/dockpilot-agent"
+)
 
 func (t TaskExecutor) agentUpdate(ctx context.Context, task protocol.TaskPayload, logLine func(string)) (bool, error) {
 	repo := nonEmpty(task.Args["repo"], t.ReleaseRepo)
@@ -31,7 +34,7 @@ func (t TaskExecutor) agentUpdate(ctx context.Context, task protocol.TaskPayload
 	}
 	logLine(fmt.Sprintf("Preparing agent update: current=%s target=%s mode=%s", version.Version, targetVersion, installMode))
 	if installMode == "docker" {
-		return false, t.scheduleInstallerUpdate(ctx, task, repo, targetVersion, "install-agent-docker", logLine)
+		return false, t.scheduleDockerAgentUpdate(ctx, task, repo, targetVersion, logLine)
 	}
 	restart, err := t.updateBinaryAgent(ctx, repo, targetVersion, logLine)
 	if err != nil {
@@ -83,6 +86,131 @@ func (t TaskExecutor) updateBinaryAgent(ctx context.Context, repo, targetVersion
 	}
 	logLine(fmt.Sprintf("Agent binary updated to %s. Restarting agent process.", clean))
 	return true, nil
+}
+
+func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protocol.TaskPayload, repo, targetVersion string, logLine func(string)) error {
+	serverURL := nonEmpty(task.Args["server_url"], t.ServerURL)
+	registrationToken := nonEmpty(task.Args["registration_token"], t.RegistrationToken)
+	nodeName := nonEmpty(task.Args["node_name"], t.NodeName)
+	agentImage := nonEmpty(task.Args["agent_image"], t.AgentImage)
+	agentImage = nonEmpty(agentImage, defaultAgentImage)
+	if serverURL == "" {
+		return fmt.Errorf("server_url is required for docker agent update")
+	}
+	targetImage := dockerImageRef(agentImage, targetVersion)
+	helperImage := currentContainerImage(ctx, agentImage)
+	updaterName := fmt.Sprintf("dockpilot-agent-updater-%d", time.Now().UnixNano())
+	composeDirs := strings.Join(t.ComposeDirs, ",")
+	if composeDirs == "" {
+		composeDirs = "/opt,/srv,/var/www"
+	}
+	args := []string{
+		"run", "-d", "--rm",
+		"--name", updaterName,
+		"--entrypoint", "sh",
+		"-v", "/var/run/docker.sock:/var/run/docker.sock",
+		"-e", "DP_TARGET_IMAGE=" + targetImage,
+		"-e", "DP_SERVER_URL=" + serverURL,
+		"-e", "DP_REGISTRATION_TOKEN=" + registrationToken,
+		"-e", "DP_NODE_NAME=" + nodeName,
+		"-e", "DP_COMPOSE_DIRS=" + composeDirs,
+		"-e", "DP_UPDATE_CACHE_SECONDS=" + fmt.Sprint(durationSeconds(t.UpdateCacheTTL, 900)),
+		"-e", "DP_METRICS_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.MetricsInterval, 15)),
+		"-e", "DP_SNAPSHOT_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.SnapshotInterval, 60)),
+		"-e", "DP_RELEASE_REPO=" + repo,
+		helperImage,
+		"-c", dockerUpdaterScript(),
+	}
+	logLine("Starting detached Docker updater container: " + updaterName)
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	out, err := cmd.CombinedOutput()
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			logLine(line)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("start docker updater: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	logLine("Docker updater container started. The agent will reconnect after the container is replaced.")
+	return nil
+}
+
+func dockerUpdaterScript() string {
+	return strings.TrimSpace(`
+set -eu
+docker pull "$DP_TARGET_IMAGE"
+docker rm -f dockpilot-agent >/dev/null 2>&1 || true
+docker run -d --name dockpilot-agent --restart unless-stopped \
+  -e TZ=Asia/Shanghai \
+  -e DOCKPILOT_SERVER_URL="$DP_SERVER_URL" \
+  -e DOCKPILOT_REGISTRATION_TOKEN="$DP_REGISTRATION_TOKEN" \
+  -e DOCKPILOT_STATE_PATH=/data/agent.json \
+  -e DOCKPILOT_NODE_NAME="$DP_NODE_NAME" \
+  -e DOCKPILOT_COMPOSE_DIRS="$DP_COMPOSE_DIRS" \
+  -e DOCKPILOT_UPDATE_CACHE_SECONDS="$DP_UPDATE_CACHE_SECONDS" \
+  -e DOCKPILOT_METRICS_INTERVAL_SECONDS="$DP_METRICS_INTERVAL_SECONDS" \
+  -e DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS="$DP_SNAPSHOT_INTERVAL_SECONDS" \
+  -e DOCKPILOT_INSTALL_MODE=docker \
+  -e DOCKPILOT_RELEASE_REPO="$DP_RELEASE_REPO" \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /opt:/opt \
+  -v /srv:/srv \
+  -v /var/www:/var/www \
+  -v dockpilot-agent-state:/data \
+  "$DP_TARGET_IMAGE"
+`)
+}
+
+func currentContainerImage(ctx context.Context, fallback string) string {
+	candidates := []string{"dockpilot-agent"}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		candidates = append([]string{hostname}, candidates...)
+	}
+	for _, candidate := range candidates {
+		out, inspectErr := commandCombined(ctx, "docker", "inspect", "--format", "{{.Config.Image}}", candidate)
+		if inspectErr == nil && strings.TrimSpace(out) != "" {
+			return strings.TrimSpace(out)
+		}
+	}
+	return dockerImageRef(nonEmpty(fallback, defaultAgentImage), "latest")
+}
+
+func dockerImageRef(image, targetVersion string) string {
+	image = imageBase(nonEmpty(image, defaultAgentImage))
+	tag := "latest"
+	clean := cleanVersion(targetVersion)
+	if clean != "" && clean != "latest" {
+		tag = version.EnsureVPrefix(clean)
+	}
+	return image + ":" + tag
+}
+
+func imageBase(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return defaultAgentImage
+	}
+	lastSlash := strings.LastIndex(ref, "/")
+	if at := strings.LastIndex(ref, "@"); at > lastSlash {
+		return ref[:at]
+	}
+	if colon := strings.LastIndex(ref, ":"); colon > lastSlash {
+		return ref[:colon]
+	}
+	return ref
+}
+
+func durationSeconds(value time.Duration, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	seconds := int(value.Seconds())
+	if seconds <= 0 {
+		return fallback
+	}
+	return seconds
 }
 
 func (t TaskExecutor) scheduleInstallerUpdate(ctx context.Context, task protocol.TaskPayload, repo, targetVersion, action string, logLine func(string)) error {

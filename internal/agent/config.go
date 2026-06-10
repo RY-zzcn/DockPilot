@@ -22,6 +22,7 @@ type Config struct {
 	UpdateCacheTTL    time.Duration
 	InstallMode       string
 	ReleaseRepo       string
+	AgentImage        string
 }
 
 type State struct {
@@ -45,6 +46,7 @@ func LoadConfig() Config {
 		UpdateCacheTTL:    time.Duration(envInt("DOCKPILOT_UPDATE_CACHE_SECONDS", 900)) * time.Second,
 		InstallMode:       env("DOCKPILOT_INSTALL_MODE", ""),
 		ReleaseRepo:       env("DOCKPILOT_RELEASE_REPO", "RY-zzcn/DockPilot"),
+		AgentImage:        env("DOCKPILOT_AGENT_IMAGE", "ghcr.io/ry-zzcn/dockpilot-agent"),
 	}
 	flag.StringVar(&cfg.ServerURL, "server", cfg.ServerURL, "DockPilot server URL")
 	flag.StringVar(&cfg.RegistrationToken, "registration-token", cfg.RegistrationToken, "one-time registration token")
@@ -54,6 +56,7 @@ func LoadConfig() Config {
 	flag.StringVar(&cfg.StatePath, "state", cfg.StatePath, "agent state file")
 	flag.StringVar(&cfg.InstallMode, "install-mode", cfg.InstallMode, "agent install mode: binary or docker")
 	flag.StringVar(&cfg.ReleaseRepo, "release-repo", cfg.ReleaseRepo, "GitHub repo for DockPilot releases")
+	flag.StringVar(&cfg.AgentImage, "agent-image", cfg.AgentImage, "Docker image used for agent self-update")
 	composeDirs := strings.Join(cfg.ComposeDirs, ",")
 	flag.StringVar(&composeDirs, "compose-dirs", composeDirs, "comma-separated compose scan directories")
 	flag.Parse()
