@@ -768,6 +768,7 @@ func (a *App) handleInstallInfo(w http.ResponseWriter, r *http.Request) {
 	uninstallAll := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall --target all", installScript)
 	uninstallPurge := fmt.Sprintf("curl -fsSL %s | bash -s -- uninstall --target all --purge", installScript)
 	writeJSON(w, http.StatusOK, map[string]string{
+		"install_script":     installScript,
 		"server_url":         serverURL,
 		"registration_token": a.cfg.AgentRegistrationToken,
 		"interactive":        interactive,

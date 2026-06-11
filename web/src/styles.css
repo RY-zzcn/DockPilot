@@ -1178,6 +1178,47 @@ textarea {
   gap: 12px;
 }
 
+.node-install-builder {
+  display: grid;
+  gap: 12px;
+}
+
+.install-mode {
+  display: grid;
+  align-content: end;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.capability-toggle {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.install-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.install-command .command-box {
+  max-height: 220px;
+}
+
 .command-tabs {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   width: min(520px, 100%);

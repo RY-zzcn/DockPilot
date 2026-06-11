@@ -813,6 +813,59 @@
 
         <section class="surface">
           <div class="surface-head">
+            <h2>添加节点</h2>
+            <Server :size="18" />
+          </div>
+          <div class="node-install-builder">
+            <div class="form-grid">
+              <label>
+                <span>节点名称</span>
+                <input v-model="agentInstallForm.node_name" :disabled="!isAdmin" placeholder="默认使用主机名" />
+              </label>
+              <label>
+                <span>Compose 扫描目录</span>
+                <input v-model="agentInstallForm.compose_dirs" :disabled="!isAdmin" placeholder="/opt,/srv,/var/www" />
+              </label>
+              <label>
+                <span>Agent 版本</span>
+                <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.14" />
+              </label>
+              <div class="install-mode">
+                <span>安装方式</span>
+                <div class="segmented compact-segmented">
+                  <button type="button" :class="{ active: agentInstallForm.mode === 'docker' }" :disabled="!isAdmin" @click="agentInstallForm.mode = 'docker'">Docker</button>
+                  <button type="button" :class="{ active: agentInstallForm.mode === 'binary' }" :disabled="!isAdmin" @click="agentInstallForm.mode = 'binary'">二进制</button>
+                </div>
+              </div>
+            </div>
+            <div class="permission-grid">
+              <label class="checkline capability-toggle">
+                <input v-model="agentInstallForm.self_update" type="checkbox" :disabled="!isAdmin" />
+                Agent 自更新
+              </label>
+              <label v-for="item in agentCapabilityOptions" :key="item.key" class="checkline capability-toggle">
+                <input v-model="agentInstallForm[item.key]" type="checkbox" :disabled="!isAdmin" />
+                {{ item.label }}
+              </label>
+            </div>
+            <div class="install-summary">
+              <span v-for="item in agentInstallSummary" :key="item" class="capability-chip enabled">{{ item }}</span>
+              <span v-if="agentInstallSummary.length === 0" class="capability-chip">仅监控与检测</span>
+            </div>
+            <div class="command-item install-command">
+              <div class="command-title">
+                <span>{{ agentInstallForm.mode === 'docker' ? 'Agent Docker 安装命令' : 'Agent 二进制安装命令' }}</span>
+                <button class="icon-button" title="复制" :disabled="!agentInstallCommand" @click="copyCommand(agentInstallCommand)">
+                  <Copy :size="16" />
+                </button>
+              </div>
+              <div class="command-box">{{ agentInstallCommand || '-' }}</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="surface">
+          <div class="surface-head">
             <h2>部署命令</h2>
             <Terminal :size="18" />
           </div>
@@ -982,6 +1035,13 @@ type NodeDetailTab = 'containers' | 'images' | 'compose' | 'profile'
 type ContainerFilter = 'all' | 'running' | 'stopped' | 'updates'
 type ProjectFilter = 'all' | 'updates' | 'failed' | 'current'
 type CommandCategory = 'quick' | 'agent' | 'server' | 'remove'
+type AgentInstallMode = 'docker' | 'binary'
+type AgentCapabilityKey =
+  | 'allow_agent_update'
+  | 'allow_compose_update'
+  | 'allow_deploy'
+  | 'allow_container_restart'
+  | 'allow_image_prune'
 
 interface Toast {
   id: number
@@ -1001,6 +1061,13 @@ const commandTabs: { value: CommandCategory; label: string }[] = [
   { value: 'agent', label: 'Agent' },
   { value: 'server', label: 'Server' },
   { value: 'remove', label: '卸载' }
+]
+const agentCapabilityOptions: { key: AgentCapabilityKey; label: string; flag: string }[] = [
+  { key: 'allow_agent_update', label: '面板触发 Agent 升级', flag: '--allow-agent-update' },
+  { key: 'allow_compose_update', label: 'Compose 更新', flag: '--allow-compose-update' },
+  { key: 'allow_deploy', label: 'Compose 部署', flag: '--allow-deploy' },
+  { key: 'allow_container_restart', label: '重启容器', flag: '--allow-container-restart' },
+  { key: 'allow_image_prune', label: '清理镜像', flag: '--allow-image-prune' }
 ]
 const savedTheme = normalizeTheme(localStorage.getItem(THEME_KEY))
 const token = ref(getToken())
@@ -1079,6 +1146,7 @@ const runtimeSettings = reactive<RuntimeSettings>({
   agent_auto_update_interval_seconds: 3600
 })
 const installInfo = reactive<InstallInfo>({
+  install_script: '',
   server_url: '',
   registration_token: '',
   interactive: '',
@@ -1093,6 +1161,24 @@ const installInfo = reactive<InstallInfo>({
   uninstall_server: '',
   uninstall_all: '',
   uninstall_purge: ''
+})
+const agentInstallForm = reactive<Record<AgentCapabilityKey, boolean> & {
+  mode: AgentInstallMode
+  node_name: string
+  compose_dirs: string
+  version: string
+  self_update: boolean
+}>({
+  mode: 'docker',
+  node_name: '',
+  compose_dirs: '/opt,/srv,/var/www',
+  version: 'latest',
+  self_update: true,
+  allow_agent_update: false,
+  allow_compose_update: false,
+  allow_deploy: false,
+  allow_container_restart: false,
+  allow_image_prune: false
 })
 
 const nodeForm = reactive({ name: '', note: '' })
@@ -1261,6 +1347,43 @@ const selectedTaskLogs = computed(() => {
     ? taskLogs.value.filter((line) => `${line.created_at} ${line.line}`.toLowerCase().includes(keyword))
     : taskLogs.value
   return lines.map((line) => `[${line.created_at}] ${line.line}`).join('\n')
+})
+const agentInstallSummary = computed(() => [
+  ...(agentInstallForm.self_update ? ['Agent 自更新'] : []),
+  ...agentCapabilityOptions.filter((item) => agentInstallForm[item.key]).map((item) => item.label)
+])
+const agentInstallCommand = computed(() => {
+  const script = installInfo.install_script || 'https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh'
+  if (!installInfo.server_url || !installInfo.registration_token) {
+    return ''
+  }
+  const action = agentInstallForm.mode === 'docker' ? 'install-agent-docker' : 'install-agent-binary'
+  const parts = [
+    `curl -fsSL ${shellArg(script)} | bash -s -- ${action}`,
+    `--server-url ${shellArg(installInfo.server_url)}`,
+    `--registration-token ${shellArg(installInfo.registration_token)}`
+  ]
+  const nodeName = agentInstallForm.node_name.trim()
+  if (nodeName) {
+    parts.push(`--node-name ${shellArg(nodeName)}`)
+  }
+  const composeDirs = agentInstallForm.compose_dirs.trim()
+  if (composeDirs) {
+    parts.push(`--compose-dirs ${shellArg(composeDirs)}`)
+  }
+  const version = agentInstallForm.version.trim()
+  if (version && version !== 'latest') {
+    parts.push(`--version ${shellArg(version)}`)
+  }
+  if (!agentInstallForm.self_update) {
+    parts.push('--disable-agent-self-update')
+  }
+  for (const item of agentCapabilityOptions) {
+    if (agentInstallForm[item.key]) {
+      parts.push(item.flag)
+    }
+  }
+  return parts.join(' ')
 })
 const commandItems = computed(() => [
   ...commandGroups.value[commandCategory.value]
@@ -1940,6 +2063,10 @@ async function copyCommand(command: string) {
     const message = err instanceof Error ? err.message : String(err)
     notify(`复制失败：${message}`, 'error')
   }
+}
+
+function shellArg(value: string) {
+  return `'${value.replace(/'/g, `'\"'\"'`)}'`
 }
 
 async function copyTaskLogs() {

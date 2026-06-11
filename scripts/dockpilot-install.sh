@@ -38,8 +38,8 @@ DockPilot installer
 Usage:
   dockpilot-install.sh install-server-docker [--public-url URL] [--admin-password PASS] [--registration-token TOKEN]
   dockpilot-install.sh install-server-binary [--public-url URL] [--admin-password PASS] [--registration-token TOKEN] [--version VERSION]
-  dockpilot-install.sh install-agent-docker --server-url URL --registration-token TOKEN [--node-name NAME]
-  dockpilot-install.sh install-agent-binary --server-url URL --registration-token TOKEN [--node-name NAME] [--version VERSION]
+  dockpilot-install.sh install-agent-docker --server-url URL --registration-token TOKEN [--node-name NAME] [--allow-compose-update] [--allow-deploy]
+  dockpilot-install.sh install-agent-binary --server-url URL --registration-token TOKEN [--node-name NAME] [--version VERSION] [--allow-compose-update] [--allow-deploy]
   dockpilot-install.sh uninstall [--target agent|server|all] [--purge] [--yes]
 
 Examples:
@@ -47,6 +47,14 @@ Examples:
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-agent-binary --server-url http://1.2.3.4:8080 --registration-token YOUR_TOKEN
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall --target agent
+
+Agent capability options:
+  --disable-agent-self-update
+  --allow-agent-update
+  --allow-compose-update
+  --allow-deploy
+  --allow-container-restart
+  --allow-image-prune
 
 Re-running an Agent install command overwrites the local Agent connection settings and restarts the Agent.
 EOF
@@ -158,6 +166,34 @@ parse_args() {
       --version)
         VERSION="$2"
         shift 2
+        ;;
+      --disable-agent-self-update)
+        DOCKPILOT_AGENT_SELF_UPDATE=false
+        shift
+        ;;
+      --agent-self-update-interval)
+        DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS="$2"
+        shift 2
+        ;;
+      --allow-agent-update)
+        DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE=true
+        shift
+        ;;
+      --allow-compose-update)
+        DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE=true
+        shift
+        ;;
+      --allow-deploy)
+        DOCKPILOT_AGENT_ALLOW_DEPLOY=true
+        shift
+        ;;
+      --allow-container-restart)
+        DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART=true
+        shift
+        ;;
+      --allow-image-prune)
+        DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE=true
+        shift
         ;;
       --target)
         TARGET="$2"
@@ -328,7 +364,11 @@ DOCKPILOT_RELEASE_REPO=${REPO}
 DOCKPILOT_AGENT_IMAGE=${AGENT_IMAGE}
 DOCKPILOT_AGENT_SELF_UPDATE=${DOCKPILOT_AGENT_SELF_UPDATE:-true}
 DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS=${DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS:-3600}
+DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE=${DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE:-false}
+DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE=${DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE:-false}
 DOCKPILOT_AGENT_ALLOW_DEPLOY=${DOCKPILOT_AGENT_ALLOW_DEPLOY:-false}
+DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART=${DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART:-false}
+DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE=${DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE:-false}
 EOF
   chmod 600 "$AGENT_ENV_FILE"
 }

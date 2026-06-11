@@ -164,6 +164,7 @@ export interface Notification {
 }
 
 export interface InstallInfo {
+  install_script?: string
   server_url: string
   registration_token: string
   interactive?: string
