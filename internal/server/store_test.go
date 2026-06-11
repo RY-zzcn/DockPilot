@@ -48,6 +48,25 @@ func TestEffectivePolicyPriority(t *testing.T) {
 	}
 }
 
+func TestDefaultPolicySchedulesUpdateDetection(t *testing.T) {
+	store := testStore(t)
+	policy, err := store.ResolvePolicy("global", "")
+	if err != nil {
+		t.Fatalf("resolve default policy: %v", err)
+	}
+	if policy.Mode != PolicyScheduled || policy.Schedule != DefaultPolicySchedule || !policy.Enabled {
+		t.Fatalf("unexpected default policy: %#v", policy)
+	}
+
+	saved, err := store.UpsertPolicy(Policy{Scope: "node", ScopeID: "node-1", Enabled: true})
+	if err != nil {
+		t.Fatalf("upsert defaulted policy: %v", err)
+	}
+	if saved.Mode != PolicyScheduled || saved.Schedule != DefaultPolicySchedule {
+		t.Fatalf("policy defaults were not applied: %#v", saved)
+	}
+}
+
 func TestTaskLifecycle(t *testing.T) {
 	store := testStore(t)
 	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
@@ -324,6 +343,59 @@ func TestFailedUpdateDetectionPreservesAvailability(t *testing.T) {
 	}
 	if !state.Containers[0].UpdateAvailable {
 		t.Fatalf("failed detection should preserve container availability: %#v", state.Containers[0])
+	}
+}
+
+func TestFallbackUpdateDetectionUsesImageResultStatus(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	snapshot := protocol.DockerSnapshotPayload{
+		Containers: []protocol.ContainerSnapshot{{
+			ID:             "container-1",
+			Name:           "web",
+			Image:          "nginx:stable",
+			State:          "running",
+			Status:         "Up",
+			ComposeProject: "site",
+		}},
+		ComposeProjects: []protocol.ComposeProjectSnapshot{{
+			ID:   "compose-1",
+			Name: "site",
+			Path: "/opt/site/compose.yml",
+		}},
+	}
+	if err := store.ReplaceDockerSnapshot("node-1", snapshot); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	_, err = store.ApplyUpdateDetections("node-1", []protocol.UpdateDetection{{
+		TargetType:  "compose",
+		TargetID:    "compose-1",
+		ProjectName: "site",
+		Path:        "/opt/site/compose.yml",
+		Error:       "compose config failed; using runtime images",
+		Images: []protocol.ImageUpdateDetection{{
+			Image:           "nginx:stable",
+			Method:          "registry",
+			Platform:        "linux/amd64",
+			UpdateAvailable: false,
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("apply fallback detection: %v", err)
+	}
+	state, err := store.DockerState("node-1")
+	if err != nil {
+		t.Fatalf("docker state: %v", err)
+	}
+	project := state.ComposeProjects[0]
+	if project.DetectionStatus != "current" || project.DetectionError == "" {
+		t.Fatalf("fallback image result should be current with retained error detail: %#v", project)
+	}
+	if project.UpdateAvailable || state.Containers[0].UpdateAvailable {
+		t.Fatalf("fallback current result should not mark updates: %#v %#v", project, state.Containers[0])
 	}
 }
 

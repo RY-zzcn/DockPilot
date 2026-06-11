@@ -33,6 +33,7 @@ func NewScheduler(store *Store, hub *AgentHub, notifier *Notifier, releases *Rel
 }
 
 func (s *Scheduler) Run(ctx context.Context) {
+	s.tick()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {

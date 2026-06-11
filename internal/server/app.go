@@ -526,7 +526,10 @@ func (a *App) handleUpsertPolicy(w http.ResponseWriter, r *http.Request) {
 		policy.Scope = "global"
 	}
 	if policy.Mode == "" {
-		policy.Mode = PolicyManual
+		policy.Mode = DefaultPolicyMode
+	}
+	if policy.Schedule == "" && policy.Mode != PolicyManual {
+		policy.Schedule = DefaultPolicySchedule
 	}
 	saved, err := a.store.UpsertPolicy(policy)
 	if err != nil {

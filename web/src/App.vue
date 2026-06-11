@@ -377,7 +377,7 @@
               <button v-for="project in dockerState.compose_projects" :key="project.id" class="project-pill" @click="openProject(project)">
                 <strong>{{ project.name }}</strong>
                 <span>{{ project.path }}</span>
-                <em :class="detectionBadgeClass(project)">{{ detectionLabel(project) }}</em>
+                <em :class="detectionBadgeClass(project)" :title="detectionTitle(project)">{{ detectionLabel(project) }}</em>
               </button>
             </div>
           </section>
@@ -444,7 +444,7 @@
               >
                 <strong>{{ project.name }}</strong>
                 <span>{{ project.path }}</span>
-                <em :class="detectionBadgeClass(project)">{{ detectionLabel(project) }}</em>
+                <em :class="detectionBadgeClass(project)" :title="detectionTitle(project)">{{ detectionLabel(project) }}</em>
                 <small v-if="detectionMeta(project)">{{ detectionMeta(project) }}</small>
               </button>
             </div>
@@ -469,7 +469,7 @@
               </div>
             </div>
             <div v-if="selectedProject" class="project-meta">
-              <span><strong>状态</strong><em :class="detectionBadgeClass(selectedProject)">{{ detectionLabel(selectedProject) }}</em></span>
+              <span><strong>状态</strong><em :class="detectionBadgeClass(selectedProject)" :title="detectionTitle(selectedProject)">{{ detectionLabel(selectedProject) }}</em></span>
               <span><strong>检测</strong>{{ detectionMeta(selectedProject) || '-' }}</span>
               <span v-if="selectedProject.detection_error" class="error-text"><strong>错误</strong>{{ selectedProject.detection_error }}</span>
             </div>
@@ -564,7 +564,7 @@
               <div class="update-main">
                 <strong>{{ row.project.name }}</strong>
                 <span>{{ row.project.path }}</span>
-                <em :class="detectionBadgeClass(row.project)">{{ detectionLabel(row.project) }}</em>
+                <em :class="detectionBadgeClass(row.project)" :title="detectionTitle(row.project)">{{ detectionLabel(row.project) }}</em>
                 <small v-if="detectionMeta(row.project)">{{ detectionMeta(row.project) }}</small>
                 <small v-if="row.project.detection_error" class="error-text">{{ row.project.detection_error }}</small>
               </div>
@@ -573,7 +573,7 @@
                 <button :class="{ active: row.policy.mode === 'scheduled' }" @click="row.policy.mode = 'scheduled'">定时</button>
                 <button :class="{ active: row.policy.mode === 'automatic' }" @click="row.policy.mode = 'automatic'">全自动</button>
               </div>
-              <input v-model="row.policy.schedule" class="schedule-input" placeholder="@daily / interval:6h" />
+              <input v-model="row.policy.schedule" class="schedule-input" placeholder="interval:1h / @daily" />
               <input v-model="row.policy.exclude_patterns" class="schedule-input" placeholder="排除关键字" />
               <div class="button-row compact-actions">
                 <button class="icon-button" title="保存策略" :disabled="!isAdmin" @click="savePolicy(row.policy)">
@@ -735,7 +735,18 @@
             <h2>部署命令</h2>
             <Terminal :size="18" />
           </div>
-          <div class="command-grid">
+          <div class="segmented command-tabs">
+            <button
+              v-for="tab in commandTabs"
+              :key="tab.value"
+              type="button"
+              :class="{ active: commandCategory === tab.value }"
+              @click="commandCategory = tab.value"
+            >
+              {{ tab.label }}
+            </button>
+          </div>
+          <div class="command-list">
             <div v-for="item in commandItems" :key="item.label" class="command-item">
               <div class="command-title">
                 <span>{{ item.label }}</span>
@@ -882,11 +893,12 @@ import type {
 } from './types'
 
 type ViewName = 'dashboard' | 'nodes' | 'projects' | 'updates' | 'tasks' | 'settings'
-type ThemeName = 'operator' | 'graphite' | 'ember' | 'terminal'
+type ThemeName = 'light' | 'sky' | 'operator' | 'mono'
 type ToastType = 'info' | 'success' | 'error'
 type NodeDetailTab = 'containers' | 'images' | 'compose' | 'profile'
 type ContainerFilter = 'all' | 'running' | 'stopped' | 'updates'
 type ProjectFilter = 'all' | 'updates' | 'failed' | 'current'
+type CommandCategory = 'quick' | 'agent' | 'server' | 'remove'
 
 interface Toast {
   id: number
@@ -895,19 +907,24 @@ interface Toast {
 }
 
 const THEME_KEY = 'dockpilot.theme'
+const REFRESH_INTERVAL_MS = 10000
 const themes: { value: ThemeName; label: string }[] = [
-  { value: 'operator', label: '运维' },
-  { value: 'graphite', label: '石墨' },
-  { value: 'ember', label: '日冕' },
-  { value: 'terminal', label: '终端' }
+  { value: 'light', label: '白色' },
+  { value: 'sky', label: '浅蓝' },
+  { value: 'operator', label: '深色' },
+  { value: 'mono', label: '黑白夜' }
 ]
-const savedTheme = localStorage.getItem(THEME_KEY) as ThemeName | null
+const commandTabs: { value: CommandCategory; label: string }[] = [
+  { value: 'quick', label: '快速' },
+  { value: 'agent', label: 'Agent' },
+  { value: 'server', label: 'Server' },
+  { value: 'remove', label: '卸载' }
+]
+const savedTheme = normalizeTheme(localStorage.getItem(THEME_KEY))
 const token = ref(getToken())
 const user = ref<AuthClaims | null>(null)
 const activeView = ref<ViewName>('dashboard')
-const themeName = ref<ThemeName>(
-  themes.some((theme) => theme.value === savedTheme) ? (savedTheme as ThemeName) : 'operator'
-)
+const themeName = ref<ThemeName>(savedTheme || 'sky')
 const themeMenuOpen = ref(false)
 const busy = ref(false)
 const error = ref('')
@@ -922,11 +939,13 @@ const containerSearch = ref('')
 const containerStateFilter = ref<ContainerFilter>('all')
 const projectSearch = ref('')
 const projectFilter = ref<ProjectFilter>('all')
+const commandCategory = ref<CommandCategory>('quick')
 const toasts = ref<Toast[]>([])
 const pendingActions = ref<string[]>([])
 const currentClock = ref('')
 let clockTimer: number | undefined
 let refreshTimer: number | undefined
+let refreshPromise: Promise<void> | null = null
 let toastID = 0
 
 const loginForm = reactive({ username: 'admin', password: 'admin' })
@@ -1128,17 +1147,28 @@ const selectedTaskLogs = computed(() => {
   return taskLogs.value.map((line) => `[${line.created_at}] ${line.line}`).join('\n')
 })
 const commandItems = computed(() => [
-  { label: '交互式部署/卸载', value: installInfo.interactive || '' },
-  { label: 'Agent 二进制接入', value: installInfo.agent_binary || installInfo.binary_command || '' },
-  { label: 'Agent Docker 接入', value: installInfo.agent_docker || installInfo.docker_command || '' },
-  { label: 'Server Docker 部署', value: installInfo.server_docker || '' },
-  { label: 'Server 二进制部署', value: installInfo.server_binary || '' },
-  { label: '交互式卸载', value: installInfo.uninstall || '' },
-  { label: '仅卸载 Agent', value: installInfo.uninstall_agent || '' },
-  { label: '仅卸载 Server', value: installInfo.uninstall_server || '' },
-  { label: '全部卸载', value: installInfo.uninstall_all || '' },
-  { label: '彻底卸载', value: installInfo.uninstall_purge || '' }
+  ...commandGroups.value[commandCategory.value]
 ])
+const commandGroups = computed<Record<CommandCategory, { label: string; value: string }[]>>(() => ({
+  quick: [
+    { label: '交互式部署/卸载', value: installInfo.interactive || '' }
+  ],
+  agent: [
+    { label: 'Agent Docker 接入', value: installInfo.agent_docker || installInfo.docker_command || '' },
+    { label: 'Agent 二进制接入', value: installInfo.agent_binary || installInfo.binary_command || '' }
+  ],
+  server: [
+    { label: 'Server Docker 部署', value: installInfo.server_docker || '' },
+    { label: 'Server 二进制部署', value: installInfo.server_binary || '' }
+  ],
+  remove: [
+    { label: '交互式卸载', value: installInfo.uninstall || '' },
+    { label: '仅卸载 Agent', value: installInfo.uninstall_agent || '' },
+    { label: '仅卸载 Server', value: installInfo.uninstall_server || '' },
+    { label: '全部卸载', value: installInfo.uninstall_all || '' },
+    { label: '彻底卸载', value: installInfo.uninstall_purge || '' }
+  ]
+}))
 
 const PolicyEditor = defineComponent({
   props: {
@@ -1163,7 +1193,7 @@ const PolicyEditor = defineComponent({
         h('input', {
           value: props.policy.schedule,
           disabled: props.disabled,
-          placeholder: '@daily / interval:6h',
+          placeholder: 'interval:1h / @daily',
           onInput: (event: Event) => (props.policy.schedule = (event.target as HTMLInputElement).value)
         }),
         h('input', {
@@ -1206,7 +1236,7 @@ onMounted(() => {
     if (token.value) {
       refreshAll()
     }
-  }, 30000)
+  }, REFRESH_INTERVAL_MS)
 })
 onUnmounted(() => {
   if (clockTimer) window.clearInterval(clockTimer)
@@ -1236,6 +1266,15 @@ async function bootstrap() {
   } catch {
     logout()
   }
+}
+
+function normalizeTheme(value: string | null): ThemeName | null {
+  if (value === 'light' || value === 'sky' || value === 'operator' || value === 'mono') {
+    return value
+  }
+  if (value === 'graphite') return 'mono'
+  if (value === 'ember' || value === 'terminal') return 'operator'
+  return null
 }
 
 function tickClock() {
@@ -1326,6 +1365,16 @@ async function manualRefresh() {
 }
 
 async function refreshAll() {
+  if (refreshPromise) {
+    return refreshPromise
+  }
+  refreshPromise = doRefreshAll().finally(() => {
+    refreshPromise = null
+  })
+  return refreshPromise
+}
+
+async function doRefreshAll() {
   error.value = ''
   try {
     const [overviewData, nodesData, tasksData, policiesData, notificationsData, versionData] = await Promise.all([
@@ -1354,6 +1403,7 @@ async function refreshAll() {
     if (isAdmin.value) {
       await loadAdminSettings()
     }
+    await refreshSelectedTask(tasksData)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
@@ -1510,6 +1560,20 @@ async function createSelectedProjectTask(kind: string) {
 
 async function refreshTasks() {
   tasks.value = await api.tasks()
+  await refreshSelectedTask(tasks.value)
+}
+
+async function refreshSelectedTask(taskList = tasks.value) {
+  const taskId = selectedTask.value?.id
+  if (!taskId) return
+  const latestTask = taskList.find((task) => task.id === taskId)
+  if (!latestTask) {
+    selectedTask.value = null
+    taskLogs.value = []
+    return
+  }
+  selectedTask.value = latestTask
+  taskLogs.value = await api.taskLogs(taskId)
 }
 
 async function clearTasksScope(scope: 'finished' | 'failed', label: string) {
@@ -1588,8 +1652,8 @@ function policyDraftFor(scope: string, scopeId: string): Policy {
       : {
           scope,
           scope_id: scopeId,
-          mode: 'manual',
-          schedule: scope === 'global' ? '@daily' : '',
+          mode: 'scheduled',
+          schedule: 'interval:1h',
           exclude_patterns: 'mysql,postgres,mariadb,redis',
           enabled: true
         }
@@ -1676,22 +1740,28 @@ async function copyCommand(command: string) {
 }
 
 function detectionLabel(project: ComposeProject) {
-  if (project.detection_status === 'partial') return '部分失败'
+  if (project.detection_status === 'partial') return '部分异常'
   if (project.detection_status === 'failed') return '检测失败'
-  if (project.update_available || project.detection_status === 'update_available') return '可更新'
-  if (project.detection_status === 'checked' || project.detection_status === 'current') return '已检测'
-  if (project.checked_at) return '已检测'
+  if (project.update_available || project.detection_status === 'update_available') return '有更新'
+  if (project.detection_status === 'checked' || project.detection_status === 'current') return '已是最新'
+  if (project.checked_at) return '已是最新'
   return '未检测'
 }
 
 function detectionBadgeClass(project: ComposeProject) {
-  if (project.detection_status === 'partial' || project.detection_status === 'failed') return 'mini-danger'
+  if (project.detection_status === 'failed') return 'mini-danger'
+  if (project.detection_status === 'partial') return 'mini-alert'
   if (project.update_available || project.detection_status === 'update_available') return 'mini-alert'
+  if (project.detection_status === 'checked' || project.detection_status === 'current' || project.checked_at) return 'mini-success'
   return 'mini-muted'
 }
 
 function detectionMeta(project: ComposeProject) {
   return [project.detection_method, project.detection_platform, project.checked_at].filter(Boolean).join(' · ')
+}
+
+function detectionTitle(project: ComposeProject) {
+  return [detectionLabel(project), detectionMeta(project), project.detection_error].filter(Boolean).join('\n')
 }
 
 function taskMessage(task: Task) {

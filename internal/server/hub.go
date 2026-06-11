@@ -275,7 +275,7 @@ func (h *AgentHub) handleAgentMessage(msg protocol.Message) {
 					h.notifier.Notify("warning", "更新可用", payload.TaskID+" 检测到 "+fmt.Sprint(count)+" 个镜像可更新")
 				}
 				if failed := failedDetections(payload.Updates); failed > 0 {
-					h.notifier.Notify("warning", "检测失败", payload.TaskID+" 有 "+fmt.Sprint(failed)+" 项检测失败")
+					h.notifier.Notify("warning", "检测异常", payload.TaskID+" 有 "+fmt.Sprint(failed)+" 项需要处理")
 				}
 			}
 			if status == TaskSuccess && (task.Kind == "compose_update" || task.Kind == "compose_deploy") {

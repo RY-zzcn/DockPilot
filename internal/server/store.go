@@ -23,10 +23,13 @@ const (
 	PolicyScheduled = "scheduled"
 	PolicyAutomatic = "automatic"
 
-	TaskPending = "pending"
-	TaskRunning = "running"
-	TaskSuccess = "success"
-	TaskFailed  = "failed"
+	DefaultPolicyMode     = PolicyScheduled
+	DefaultPolicySchedule = "interval:1h"
+
+	TaskPending  = "pending"
+	TaskRunning  = "running"
+	TaskSuccess  = "success"
+	TaskFailed   = "failed"
 	TaskCanceled = "canceled"
 )
 
@@ -63,9 +66,9 @@ type Node struct {
 type Metric struct {
 	ID             int64   `json:"id"`
 	NodeID         string  `json:"node_id"`
-	CPUPercent    float64 `json:"cpu_percent"`
-	MemoryUsed    uint64  `json:"memory_used"`
-	MemoryTotal   uint64  `json:"memory_total"`
+	CPUPercent     float64 `json:"cpu_percent"`
+	MemoryUsed     uint64  `json:"memory_used"`
+	MemoryTotal    uint64  `json:"memory_total"`
 	DiskUsed       uint64  `json:"disk_used"`
 	DiskTotal      uint64  `json:"disk_total"`
 	NetworkRx      uint64  `json:"network_rx"`
@@ -75,13 +78,13 @@ type Metric struct {
 }
 
 type Container struct {
-	ID             string `json:"id"`
-	NodeID         string `json:"node_id"`
-	Name           string `json:"name"`
-	Image          string `json:"image"`
-	State          string `json:"state"`
-	Status         string `json:"status"`
-	ComposeProject string `json:"compose_project"`
+	ID              string `json:"id"`
+	NodeID          string `json:"node_id"`
+	Name            string `json:"name"`
+	Image           string `json:"image"`
+	State           string `json:"state"`
+	Status          string `json:"status"`
+	ComposeProject  string `json:"compose_project"`
 	UpdateAvailable bool   `json:"update_available"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -173,7 +176,7 @@ type Overview struct {
 	ContainersTotal  int64  `json:"containers_total"`
 	UpdatesAvailable int64  `json:"updates_available"`
 	FailedTasks      int64  `json:"failed_tasks"`
-	LastMetric        Metric `json:"last_metric"`
+	LastMetric       Metric `json:"last_metric"`
 }
 
 type DockerState struct {
@@ -1091,7 +1094,10 @@ func (s *Store) UpsertPolicy(policy Policy) (Policy, error) {
 		policy.ID = RandomToken("pol_")
 	}
 	if policy.Mode == "" {
-		policy.Mode = PolicyManual
+		policy.Mode = DefaultPolicyMode
+	}
+	if policy.Schedule == "" && policy.Mode != PolicyManual {
+		policy.Schedule = DefaultPolicySchedule
 	}
 	_, err := s.db.Exec(`
 INSERT INTO policies(id, scope, scope_id, mode, schedule, exclude_patterns, enabled, updated_at)
@@ -1121,10 +1127,11 @@ func (s *Store) ResolvePolicy(scope, scopeID string) (Policy, error) {
 		return s.ResolvePolicy("global", "")
 	}
 	return Policy{
-		ID:      "default",
-		Scope:   "global",
-		Mode:    PolicyManual,
-		Enabled: true,
+		ID:       "default",
+		Scope:    "global",
+		Mode:     DefaultPolicyMode,
+		Schedule: DefaultPolicySchedule,
+		Enabled:  true,
 	}, nil
 }
 
@@ -1312,11 +1319,10 @@ func taskPayloadArg(payload, key string) string {
 }
 
 func detectionSummary(detection protocol.UpdateDetection) (status, method, platform, message string) {
-	status = "current"
-	if detection.Error != "" {
-		status = "failed"
-		message = detection.Error
-	}
+	message = detection.Error
+	checkedImages := 0
+	failedImages := 0
+	updateAvailable := false
 	for _, image := range detection.Images {
 		if method == "" {
 			method = image.Method
@@ -1324,24 +1330,32 @@ func detectionSummary(detection protocol.UpdateDetection) (status, method, platf
 		if platform == "" {
 			platform = image.Platform
 		}
-		if image.UpdateAvailable {
-			if status == "failed" {
-				status = "partial"
-			} else {
-				status = "update_available"
+		if image.Error != "" {
+			failedImages++
+			if message == "" {
+				message = image.Image + ": " + image.Error
 			}
+			continue
 		}
-		if image.Error != "" && message == "" {
-			message = image.Image + ": " + image.Error
-			if status == "update_available" {
-				status = "partial"
-			} else {
-				status = "failed"
-			}
+		checkedImages++
+		if image.UpdateAvailable {
+			updateAvailable = true
 		}
 	}
-	if len(detection.Images) == 0 && detection.Error == "" {
+
+	switch {
+	case len(detection.Images) == 0 && detection.Error == "":
 		status = "checked"
+	case checkedImages == 0 && (detection.Error != "" || failedImages > 0):
+		status = "failed"
+	case updateAvailable && failedImages > 0:
+		status = "partial"
+	case updateAvailable:
+		status = "update_available"
+	case failedImages > 0:
+		status = "partial"
+	default:
+		status = "current"
 	}
 	return status, method, platform, message
 }
