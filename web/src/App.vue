@@ -225,6 +225,21 @@
               </button>
             </div>
           </section>
+
+          <section class="surface">
+            <div class="surface-head">
+              <h2>异常与更新</h2>
+              <AlertTriangle :size="18" />
+            </div>
+            <div class="compact-list">
+              <button v-for="item in attentionItems" :key="item.key" class="task-line attention-line" @click="item.action">
+                <span class="badge pending">{{ item.kind }}</span>
+                <strong>{{ item.title }}</strong>
+                <small>{{ item.detail }}</small>
+              </button>
+              <p v-if="attentionItems.length === 0" class="empty-hint">当前没有需要处理的项目。</p>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -267,15 +282,15 @@
               <span>心跳 <strong>{{ selectedNode?.last_seen || '-' }}</strong></span>
             </div>
             <div class="button-row">
-              <button class="secondary" :disabled="!selectedNodeId || !isAdmin" @click="createNodeTask('detect_updates')">
+              <button class="secondary" :disabled="!selectedNodeId || !isAdmin || !canRunTask(selectedNode, 'detect_updates')" @click="createNodeTask('detect_updates')">
                 <Search :size="18" />
                 检测
               </button>
-              <button class="secondary" :disabled="!selectedNodeId || !isAdmin" @click="createNodeTask('prune_images')">
+              <button class="secondary" :disabled="!selectedNodeId || !isAdmin || !canRunTask(selectedNode, 'prune_images')" :title="capabilityWarning('prune_images')" @click="createNodeTask('prune_images')">
                 <Trash2 :size="18" />
                 清理镜像
               </button>
-              <button class="secondary" :disabled="!selectedNode || !isAdmin || !agentCanUpdate(selectedNode)" @click="upgradeAgent(selectedNode)">
+              <button class="secondary" :disabled="!selectedNode || !isAdmin || !agentCanUpdate(selectedNode)" :title="capabilityWarning('agent_update')" @click="upgradeAgent(selectedNode)">
                 <RefreshCw :size="18" />
                 升级 Agent
               </button>
@@ -334,7 +349,7 @@
                   <button
                     class="icon-button"
                     title="重启容器"
-                    :disabled="!isAdmin"
+                    :disabled="!isAdmin || !canRunTask(selectedNode, 'restart_container')"
                     @click="createNodeTask('restart_container', 'container', container.id)"
                   >
                     <RotateCcw :size="16" />
@@ -408,6 +423,11 @@
                   删除
                 </button>
               </div>
+              <div class="capability-grid">
+                <span v-for="item in capabilityItems(selectedNode)" :key="item.label" class="capability-chip" :class="{ enabled: item.enabled }">
+                  {{ item.label }} · {{ item.enabled ? '允许' : '关闭' }}
+                </span>
+              </div>
             </form>
           </section>
         </section>
@@ -444,6 +464,7 @@
               >
                 <strong>{{ project.name }}</strong>
                 <span>{{ project.path }}</span>
+                <small>{{ composeOwnershipLabel(project) }}</small>
                 <em :class="detectionBadgeClass(project)" :title="detectionTitle(project)">{{ detectionLabel(project) }}</em>
                 <small v-if="detectionMeta(project)">{{ detectionMeta(project) }}</small>
               </button>
@@ -458,11 +479,11 @@
                   <Plus :size="18" />
                   新建
                 </button>
-                <button class="secondary" type="button" :disabled="!selectedProject || !isAdmin" @click="createSelectedProjectTask('detect_updates')">
+                <button class="secondary" type="button" :disabled="!selectedProject || !isAdmin || !canRunTask(selectedNode, 'detect_updates')" @click="createSelectedProjectTask('detect_updates')">
                   <Search :size="18" />
                   检测
                 </button>
-                <button class="secondary" type="button" :disabled="!selectedProject || !isAdmin" @click="createSelectedProjectTask('compose_update')">
+                <button class="secondary" type="button" :disabled="!selectedProject || !isAdmin || !canRunTask(selectedNode, 'compose_update')" :title="capabilityWarning('compose_update')" @click="createSelectedProjectTask('compose_update')">
                   <Play :size="18" />
                   更新
                 </button>
@@ -470,8 +491,11 @@
             </div>
             <p v-if="selectedProject && !selectedProject.managed" class="security-note">
               扫描到的 Compose 默认只读，面板不显示文件内容，也不能直接覆盖修改。需要变更请在节点端编辑，或新建面板托管 Compose。
+              <button class="inline-link" type="button" :disabled="!isAdmin || selectedProject.imported" @click="importSelectedCompose('read_only')">导入只读</button>
+              <button class="inline-link danger-link" type="button" :disabled="!isAdmin" @click="importSelectedCompose('managed')">确认接管</button>
             </p>
             <div v-if="selectedProject" class="project-meta">
+              <span><strong>归属</strong>{{ composeOwnershipLabel(selectedProject) }}</span>
               <span><strong>状态</strong><em :class="detectionBadgeClass(selectedProject)" :title="detectionTitle(selectedProject)">{{ detectionLabel(selectedProject) }}</em></span>
               <span><strong>检测</strong>{{ detectionMeta(selectedProject) || '-' }}</span>
               <span v-if="detectionReason(selectedProject)" class="error-text"><strong>原因</strong>{{ detectionReason(selectedProject) }}</span>
@@ -495,7 +519,7 @@
               ></textarea>
               <div class="button-row">
                 <label class="checkline">
-                  <input v-model="composeForm.deploy_now" type="checkbox" :disabled="!canEditCompose" />
+                  <input v-model="composeForm.deploy_now" type="checkbox" :disabled="!canEditCompose || !canRunTask(selectedNode, 'compose_deploy')" />
                   立即部署
                 </label>
                 <button class="primary" type="submit" :disabled="!selectedNodeId || !canEditCompose">
@@ -562,7 +586,7 @@
         <section class="surface">
           <div class="surface-head">
             <h2>Compose 更新</h2>
-            <button class="secondary" :disabled="!isAdmin || !selectedNodeId" @click="createNodeTask('detect_updates')">
+            <button class="secondary" :disabled="!isAdmin || !canRunTask(selectedNode, 'detect_updates')" @click="createNodeTask('detect_updates')">
               <Search :size="18" />
               检测当前节点
             </button>
@@ -582,15 +606,21 @@
                 <button :class="{ active: row.policy.mode === 'automatic' }" @click="row.policy.mode = 'automatic'">自动更新</button>
               </div>
               <input v-model="row.policy.schedule" class="schedule-input" placeholder="自动更新间隔 interval:1h / @daily" />
+              <input v-model="row.policy.maintenance_window" class="schedule-input" placeholder="维护窗口 02:00-05:00" />
+              <input v-model="row.policy.healthcheck_url" class="schedule-input" placeholder="健康检查 URL" />
               <input v-model="row.policy.exclude_patterns" class="schedule-input" placeholder="不自动更新的关键字" />
+              <label class="checkline compact-check">
+                <input v-model="row.policy.rollback_on_failure" type="checkbox" />
+                失败回滚
+              </label>
               <div class="button-row compact-actions">
                 <button class="icon-button" title="保存策略" :disabled="!isAdmin" @click="savePolicy(row.policy)">
                   <Save :size="16" />
                 </button>
-                <button class="icon-button" title="检测更新" :disabled="!isAdmin" @click="createProjectTask('detect_updates', row.project)">
+                <button class="icon-button" title="检测更新" :disabled="!isAdmin || !canRunTask(nodes.find((node) => node.id === row.project.node_id), 'detect_updates')" @click="createProjectTask('detect_updates', row.project)">
                   <Search :size="16" />
                 </button>
-                <button class="icon-button" title="执行更新" :disabled="!isAdmin" @click="createProjectTask('compose_update', row.project)">
+                <button class="icon-button" title="执行更新" :disabled="!isAdmin || !canRunTask(nodes.find((node) => node.id === row.project.node_id), 'compose_update')" @click="createProjectTask('compose_update', row.project)">
                   <Play :size="16" />
                 </button>
               </div>
@@ -706,7 +736,18 @@
         <section class="surface task-detail">
           <div class="surface-head">
             <h2>详情</h2>
-            <Terminal :size="18" />
+            <div class="button-row compact-actions">
+              <label class="search-field compact-search">
+                <Search :size="16" />
+                <input v-model="taskLogSearch" placeholder="搜索日志" />
+              </label>
+              <button class="icon-button" title="复制日志" :disabled="!selectedTask" @click="copyTaskLogs">
+                <Copy :size="16" />
+              </button>
+              <button class="icon-button" title="折叠日志" :disabled="!selectedTask" @click="taskLogsCollapsed = !taskLogsCollapsed">
+                <Terminal :size="16" />
+              </button>
+            </div>
           </div>
           <div class="task-meta" v-if="selectedTask">
             <span><strong>ID</strong>{{ selectedTask.id }}</span>
@@ -714,7 +755,8 @@
             <span><strong>状态</strong><em class="badge" :class="selectedTask.status">{{ statusText(selectedTask.status) }}</em></span>
             <span><strong>结果</strong>{{ taskMessage(selectedTask) || '-' }}</span>
           </div>
-          <pre class="logs">{{ selectedTaskLogs }}</pre>
+          <pre v-if="!taskLogsCollapsed" class="logs">{{ selectedTaskLogs }}</pre>
+          <p v-else class="empty-hint">日志已折叠。</p>
         </section>
       </section>
 
@@ -974,6 +1016,8 @@ const selectedProjectId = ref('')
 const selectedTask = ref<Task | null>(null)
 const taskLogs = ref<TaskLog[]>([])
 const taskFilter = ref<'all' | 'active' | 'failed'>('all')
+const taskLogSearch = ref('')
+const taskLogsCollapsed = ref(false)
 const nodeDetailTab = ref<NodeDetailTab>('containers')
 const nodeSearch = ref('')
 const containerSearch = ref('')
@@ -1167,6 +1211,29 @@ const updateProjects = computed(() => dockerState.compose_projects.filter((proje
 const failedProjects = computed(() =>
   dockerState.compose_projects.filter((project) => project.detection_status === 'failed' || project.detection_status === 'partial')
 )
+const attentionItems = computed(() => [
+  ...failedProjects.value.slice(0, 3).map((project) => ({
+    key: `project:${project.id}`,
+    title: project.name,
+    detail: detectionReason(project) || project.detection_error || detectionLabel(project),
+    kind: '项目',
+    action: () => openProject(project)
+  })),
+  ...updateProjects.value.slice(0, 3).map((project) => ({
+    key: `update:${project.id}`,
+    title: project.name,
+    detail: `${detectionLabel(project)} · ${project.path}`,
+    kind: '更新',
+    action: () => openProject(project)
+  })),
+  ...failedTasks.value.slice(0, 3).map((task) => ({
+    key: `task:${task.id}`,
+    title: taskTitle(task.kind),
+    detail: taskMessage(task) || task.id,
+    kind: '任务',
+    action: () => openTask(task)
+  }))
+])
 const composePolicyRows = computed(() =>
   dockerState.compose_projects.map((project) => ({
     project,
@@ -1189,7 +1256,11 @@ const selectedTaskLogs = computed(() => {
   if (taskLogs.value.length === 0) {
     return `${selectedTask.value.id}\n暂无日志`
   }
-  return taskLogs.value.map((line) => `[${line.created_at}] ${line.line}`).join('\n')
+  const keyword = taskLogSearch.value.trim().toLowerCase()
+  const lines = keyword
+    ? taskLogs.value.filter((line) => `${line.created_at} ${line.line}`.toLowerCase().includes(keyword))
+    : taskLogs.value
+  return lines.map((line) => `[${line.created_at}] ${line.line}`).join('\n')
 })
 const commandItems = computed(() => [
   ...commandGroups.value[commandCategory.value]
@@ -1239,11 +1310,32 @@ const PolicyEditor = defineComponent({
           onInput: (event: Event) => (props.policy.schedule = (event.target as HTMLInputElement).value)
         }),
         h('input', {
+          value: props.policy.maintenance_window || '',
+          disabled: props.disabled,
+          placeholder: '维护窗口 02:00-05:00，可留空',
+          onInput: (event: Event) => (props.policy.maintenance_window = (event.target as HTMLInputElement).value)
+        }),
+        h('input', {
+          value: props.policy.healthcheck_url || '',
+          disabled: props.disabled,
+          placeholder: '健康检查 URL，可留空',
+          onInput: (event: Event) => (props.policy.healthcheck_url = (event.target as HTMLInputElement).value)
+        }),
+        h('input', {
           value: props.policy.exclude_patterns,
           disabled: props.disabled,
           placeholder: '不自动更新的关键字',
           onInput: (event: Event) => (props.policy.exclude_patterns = (event.target as HTMLInputElement).value)
         }),
+        h('label', { class: 'checkline' }, [
+          h('input', {
+            type: 'checkbox',
+            checked: props.policy.rollback_on_failure,
+            disabled: props.disabled,
+            onChange: (event: Event) => (props.policy.rollback_on_failure = (event.target as HTMLInputElement).checked)
+          }),
+          '健康检查失败后回滚镜像'
+        ]),
         h('label', { class: 'checkline' }, [
           h('input', {
             type: 'checkbox',
@@ -1545,6 +1637,11 @@ async function createNodeTask(kind: string, targetType = '', targetId = '') {
 }
 
 async function createTaskForNode(nodeId: string, kind: string, targetType = '', targetId = '') {
+  const node = nodes.value.find((item) => item.id === nodeId)
+  if (!canRunTask(node, kind)) {
+    notify(capabilityWarning(kind), 'error')
+    return undefined
+  }
   return runAction(`task:${nodeId}:${kind}:${targetId}`, `正在创建任务：${taskTitle(kind)}`, `任务已创建：${taskTitle(kind)}`, () =>
     api.createTask({ node_id: nodeId, kind, target_type: targetType, target_id: targetId, args: {} })
   )
@@ -1586,6 +1683,9 @@ async function upgradeOutdatedAgents() {
 }
 
 function createAgentUpdateTask(node: Node) {
+  if (!canRunTask(node, 'agent_update')) {
+    return Promise.reject(new Error(capabilityWarning('agent_update')))
+  }
   return api.createTask({
     node_id: node.id,
     kind: 'agent_update',
@@ -1596,13 +1696,24 @@ function createAgentUpdateTask(node: Node) {
 }
 
 async function createProjectTask(kind: string, project: ComposeProject) {
+  const node = nodes.value.find((item) => item.id === project.node_id)
+  if (!canRunTask(node, kind)) {
+    notify(capabilityWarning(kind), 'error')
+    return
+  }
+  const policy = policyDraftFor('compose', project.id)
+  const args: Record<string, string> = { path: project.path, name: project.name }
+  if (kind === 'compose_update') {
+    if (policy.healthcheck_url) args.healthcheck_url = policy.healthcheck_url
+    if (policy.rollback_on_failure) args.rollback_on_failure = 'true'
+  }
   const task = await runAction(`project-task:${project.id}:${kind}`, `正在创建 ${project.name} 的${taskTitle(kind)}任务`, `任务已创建：${project.name}`, () =>
     api.createTask({
       node_id: project.node_id,
       kind,
       target_type: 'compose',
       target_id: project.id,
-      args: { path: project.path, name: project.name }
+      args
     })
   )
   if (!task) return
@@ -1645,6 +1756,8 @@ async function clearTasksScope(scope: 'finished' | 'failed', label: string) {
 
 async function openTask(task: Task) {
   selectedTask.value = task
+  taskLogSearch.value = ''
+  taskLogsCollapsed.value = false
   taskLogs.value = await api.taskLogs(task.id)
   activeView.value = 'tasks'
 }
@@ -1683,6 +1796,10 @@ async function saveCompose() {
     notify('扫描到的 Compose 项目为只读，不能在面板覆盖修改。', 'error')
     return
   }
+  if (composeForm.deploy_now && !canRunTask(selectedNode.value, 'compose_deploy')) {
+    notify(capabilityWarning('compose_deploy'), 'error')
+    return
+  }
   const saved = await runAction('save-compose', composeForm.deploy_now ? '正在保存并创建部署任务' : '正在保存 Compose', composeForm.deploy_now ? 'Compose 已保存，部署任务已创建' : 'Compose 已保存', () =>
     api.saveCompose({
       node_id: selectedNodeId.value,
@@ -1697,6 +1814,29 @@ async function saveCompose() {
   selectedProjectId.value = saved.id
   await loadDocker(selectedNodeId.value)
   await refreshTasks()
+}
+
+async function importSelectedCompose(mode: 'read_only' | 'managed') {
+  if (!selectedProject.value) return
+  if (mode === 'managed') {
+    const content = window.prompt('粘贴要由面板托管保存的 Compose 内容。此操作不会读取节点上的原文件。')
+    if (!content || !content.trim()) return
+    const confirmed = window.confirm('确认把这个扫描项目接管为面板托管？后续保存/部署可能覆盖节点上的 Compose 文件。')
+    if (!confirmed) return
+    const saved = await runAction(`import-compose:${selectedProject.value.id}:managed`, '正在导入为面板托管', '已导入为面板托管', () =>
+      api.importCompose({ node_id: selectedProject.value!.node_id, id: selectedProject.value!.id, mode, content, confirm: true })
+    )
+    if (!saved) return
+    selectedProjectId.value = saved.id
+    await loadDocker(saved.node_id)
+    return
+  }
+  const saved = await runAction(`import-compose:${selectedProject.value.id}:read`, '正在导入只读项目', '已导入为只读项目', () =>
+    api.importCompose({ node_id: selectedProject.value!.node_id, id: selectedProject.value!.id, mode })
+  )
+  if (!saved) return
+  selectedProjectId.value = saved.id
+  await loadDocker(saved.node_id)
 }
 
 function policyKey(scope: string, scopeId: string) {
@@ -1714,6 +1854,9 @@ function policyDraftFor(scope: string, scopeId: string): Policy {
           scope_id: scopeId,
           mode: 'manual',
           schedule: 'interval:1h',
+          maintenance_window: '',
+          healthcheck_url: '',
+          rollback_on_failure: false,
           exclude_patterns: 'mysql,postgres,mariadb,redis',
           enabled: true
         }
@@ -1799,9 +1942,13 @@ async function copyCommand(command: string) {
   }
 }
 
+async function copyTaskLogs() {
+  await copyCommand(selectedTaskLogs.value)
+}
+
 function detectionLabel(project: ComposeProject) {
   if (project.update_available || project.detection_status === 'update_available') return '有更新'
-  if (project.detection_status === 'partial') return '已检测，需处理'
+  if (project.detection_status === 'partial') return '需处理'
   if (project.detection_status === 'failed') return '无法检测'
   if (project.detection_status === 'checked' || project.detection_status === 'current') return '已是最新'
   if (project.checked_at) return '已是最新'
@@ -1821,7 +1968,9 @@ function detectionMeta(project: ComposeProject) {
 }
 
 function detectionTitle(project: ComposeProject) {
-  return [detectionLabel(project), detectionMeta(project), detectionReason(project), project.detection_error].filter(Boolean).join('\n')
+  const reason = detectionReason(project)
+  const rawError = project.detection_error && project.detection_error !== reason ? project.detection_error : ''
+  return [detectionLabel(project), detectionMeta(project), reason, rawError].filter(Boolean).join('\n')
 }
 
 function detectionReason(project: ComposeProject) {
@@ -1833,6 +1982,10 @@ function detectionReason(project: ComposeProject) {
 }
 
 function friendlyDetectionReason(errorText: string, status: string) {
+  const trimmed = errorText.trim()
+  if (/[\u4e00-\u9fff]/.test(trimmed)) {
+    return trimmed
+  }
   const lower = errorText.toLowerCase()
   if (lower.includes('outside agent allowed directories')) {
     return '这个 Compose 文件不在 Agent 允许扫描的目录内。请把项目放到 /opt、/srv、/var/www，或在节点端调整 DOCKPILOT_COMPOSE_DIRS。'
@@ -1909,16 +2062,79 @@ function taskNodeName(nodeID: string) {
 function agentCanUpdate(node?: Node) {
   if (!node || node.status !== 'online') return false
   const latest = latestReleaseVersion.value || (agentTargetVersion.value !== 'latest' ? agentTargetVersion.value : '')
-  return !!latest && compareVersions(node.version, latest) < 0
+  return !!latest && compareVersions(node.version, latest) < 0 && canRunTask(node, 'agent_update')
 }
 
 function agentVersionLabel(node: Node) {
   if (node.status !== 'online') return '离线'
+  if (!canRunTask(node, 'agent_update')) return '本地自管'
   const latest = latestReleaseVersion.value
   if (!node.version) return latest ? `可升级到 v${latest}` : '版本未知'
   if (!latest) return `Agent v${node.version}`
   if (compareVersions(node.version, latest) < 0) return `可升级到 v${latest}`
   return '最新'
+}
+
+function parseNodeCapabilities(node?: Node) {
+  if (!node?.capabilities) return {}
+  try {
+    return JSON.parse(node.capabilities) as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
+
+function canRunTask(node: Node | undefined, kind: string) {
+  if (!node) return false
+  if (kind === 'detect_updates') return node.status === 'online'
+  if (node.status !== 'online') return false
+  const cap = requiredCapability(kind)
+  if (!cap) return true
+  return !!parseNodeCapabilities(node)[cap]
+}
+
+function requiredCapability(kind: string) {
+  const map: Record<string, string> = {
+    agent_update: 'agent_update',
+    compose_update: 'compose_update',
+    compose_deploy: 'compose_deploy',
+    restart_container: 'restart_container',
+    prune_images: 'prune_images'
+  }
+  return map[kind] || ''
+}
+
+function capabilityWarning(kind: string) {
+  if (kind === 'detect_updates') {
+    return '节点离线或未连接，暂时不能创建检测任务。'
+  }
+  const labels: Record<string, string> = {
+    agent_update: '面板触发 Agent 升级',
+    compose_update: 'Compose 更新',
+    compose_deploy: 'Compose 部署',
+    restart_container: '重启容器',
+    prune_images: '清理镜像'
+  }
+  return `${labels[kind] || kind} 未在节点 Agent 端开启。请设置对应 DOCKPILOT_AGENT_ALLOW_* 环境变量并重启 Agent。`
+}
+
+function capabilityItems(node?: Node) {
+  const caps = parseNodeCapabilities(node)
+  return [
+    { label: '检测', enabled: node?.status === 'online' && (!!caps.detect_updates || !!node) },
+    { label: '更新', enabled: !!caps.compose_update },
+    { label: '部署', enabled: !!caps.compose_deploy },
+    { label: '重启', enabled: !!caps.restart_container },
+    { label: '清理', enabled: !!caps.prune_images },
+    { label: '面板升级', enabled: !!caps.agent_update }
+  ]
+}
+
+function composeOwnershipLabel(project?: ComposeProject) {
+  if (!project) return '-'
+  if (project.managed || project.ownership === 'managed') return '面板托管'
+  if (project.imported || project.ownership === 'imported') return '只读导入'
+  return '扫描发现'
 }
 
 function agentVersionBadgeClass(node: Node) {

@@ -1,8 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/dockpilot/dockpilot/internal/protocol"
 )
@@ -67,12 +70,61 @@ func TestDefaultPolicyDisablesAutomaticUpdateOnly(t *testing.T) {
 	}
 }
 
+func TestPolicyReliabilityFieldsPersist(t *testing.T) {
+	store := testStore(t)
+	saved, err := store.UpsertPolicy(Policy{
+		Scope:             "compose",
+		ScopeID:           "compose-1",
+		Mode:              PolicyAutomatic,
+		Schedule:          "interval:2h",
+		MaintenanceWindow: "02:00-05:00",
+		HealthcheckURL:    "https://example.com/healthz",
+		RollbackOnFailure: true,
+		ExcludePatterns:   "redis",
+		Enabled:           true,
+	})
+	if err != nil {
+		t.Fatalf("upsert policy: %v", err)
+	}
+	if saved.MaintenanceWindow != "02:00-05:00" || saved.HealthcheckURL != "https://example.com/healthz" || !saved.RollbackOnFailure {
+		t.Fatalf("policy reliability fields were not saved: %#v", saved)
+	}
+	resolved, err := store.ResolvePolicy("compose", "compose-1")
+	if err != nil {
+		t.Fatalf("resolve policy: %v", err)
+	}
+	if resolved.MaintenanceWindow != saved.MaintenanceWindow || resolved.HealthcheckURL != saved.HealthcheckURL || !resolved.RollbackOnFailure {
+		t.Fatalf("policy reliability fields were not persisted: %#v", resolved)
+	}
+}
+
 func TestAllowedTaskKindRejectsDirectComposeDeploy(t *testing.T) {
 	if allowedTaskKind("compose_deploy") {
 		t.Fatal("compose_deploy should not be creatable through the generic task API")
 	}
 	if !allowedTaskKind("compose_update") {
 		t.Fatal("compose_update should remain allowed")
+	}
+}
+
+func TestUpsertNodeStoresCapabilities(t *testing.T) {
+	store := testStore(t)
+	hello := testHello("node-1")
+	hello.Capabilities = map[string]bool{
+		"detect_updates": true,
+		"compose_update": true,
+		"compose_deploy": false,
+	}
+	node, _, err := store.UpsertNodeFromHello(hello, "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	var capabilities map[string]bool
+	if err := json.Unmarshal([]byte(node.Capabilities), &capabilities); err != nil {
+		t.Fatalf("capabilities json: %v", err)
+	}
+	if !capabilities["compose_update"] || capabilities["compose_deploy"] {
+		t.Fatalf("unexpected capabilities: %#v", capabilities)
 	}
 }
 
@@ -102,6 +154,57 @@ func TestDockerStateRedactsScannedComposeContent(t *testing.T) {
 	}
 	if state.ComposeProjects[0].Content != "" {
 		t.Fatalf("scanned compose content should be redacted, got %q", state.ComposeProjects[0].Content)
+	}
+}
+
+func TestImportComposeOwnershipAndContentVisibility(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	snapshot := protocol.DockerSnapshotPayload{
+		ComposeProjects: []protocol.ComposeProjectSnapshot{{
+			ID:      "compose-scanned",
+			Name:    "site",
+			Path:    "/opt/site/compose.yml",
+			Managed: false,
+			Content: "services:\n  db:\n    environment:\n      PASSWORD: secret\n",
+		}},
+	}
+	if err := store.ReplaceDockerSnapshot("node-1", snapshot); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	project, err := store.GetComposeProject("node-1", "compose-scanned")
+	if err != nil {
+		t.Fatalf("get compose: %v", err)
+	}
+	if project.Ownership != "scanned" || project.Imported || project.Managed || project.Content != "" {
+		t.Fatalf("scanned project should stay redacted and read-only: %#v", project)
+	}
+	readOnly, err := store.ImportComposeProjectReadOnly("node-1", "compose-scanned")
+	if err != nil {
+		t.Fatalf("import read-only: %v", err)
+	}
+	if readOnly.Ownership != "imported" || !readOnly.Imported || readOnly.Managed || readOnly.Content != "" {
+		t.Fatalf("read-only import should not expose content: %#v", readOnly)
+	}
+	if err := store.ReplaceDockerSnapshot("node-1", snapshot); err != nil {
+		t.Fatalf("second snapshot: %v", err)
+	}
+	readOnly, err = store.GetComposeProject("node-1", "compose-scanned")
+	if err != nil {
+		t.Fatalf("get read-only import: %v", err)
+	}
+	if readOnly.Ownership != "imported" || !readOnly.Imported || readOnly.Content != "" {
+		t.Fatalf("snapshot should preserve read-only ownership: %#v", readOnly)
+	}
+	managed, err := store.ImportComposeProjectManaged("node-1", "compose-scanned", "services:\n  web:\n    image: nginx:stable\n", "admin")
+	if err != nil {
+		t.Fatalf("import managed: %v", err)
+	}
+	if managed.Ownership != "managed" || managed.Imported || !managed.Managed || !strings.Contains(managed.Content, "nginx:stable") {
+		t.Fatalf("managed import should store only pasted content: %#v", managed)
 	}
 }
 
@@ -270,6 +373,41 @@ func TestClearFinishedTasks(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].ID != pending.ID {
 		t.Fatalf("pending task should remain: %#v", tasks)
+	}
+}
+
+func TestDetectionSummaryUsesReadableReason(t *testing.T) {
+	status, _, _, message := detectionSummary(protocol.UpdateDetection{
+		Reason: "Compose 配置缺少环境变量",
+		Advice: "请在项目目录补齐 .env",
+		Images: []protocol.ImageUpdateDetection{{
+			Image: "nginx:stable",
+			Error: "raw registry error",
+		}},
+	})
+	if status != "failed" {
+		t.Fatalf("expected failed status, got %s", status)
+	}
+	if !strings.Contains(message, "Compose 配置缺少环境变量") || !strings.Contains(message, "建议") {
+		t.Fatalf("message should use readable reason and advice, got %q", message)
+	}
+}
+
+func TestWithinMaintenanceWindow(t *testing.T) {
+	base := time.Date(2026, 6, 11, 2, 30, 0, 0, time.Local)
+	if !withinMaintenanceWindow("02:00-05:00", base) {
+		t.Fatal("time inside maintenance window should be allowed")
+	}
+	if withinMaintenanceWindow("03:00-05:00", base) {
+		t.Fatal("time before maintenance window should be blocked")
+	}
+	late := time.Date(2026, 6, 11, 23, 30, 0, 0, time.Local)
+	if !withinMaintenanceWindow("23:00-02:00", late) {
+		t.Fatal("cross-midnight window should include late evening")
+	}
+	early := time.Date(2026, 6, 11, 1, 30, 0, 0, time.Local)
+	if !withinMaintenanceWindow("23:00-02:00", early) {
+		t.Fatal("cross-midnight window should include early morning")
 	}
 }
 

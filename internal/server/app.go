@@ -172,6 +172,8 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		})(w, r)
 	case path == "/docker/state" && r.Method == http.MethodGet:
 		a.handleDockerState(w, r)
+	case path == "/docker/compose/import" && r.Method == http.MethodPost:
+		RequireAdmin(a.handleImportCompose)(w, r)
 	case path == "/docker/compose" && r.Method == http.MethodPost:
 		RequireAdmin(a.handleSaveCompose)(w, r)
 	case path == "/tasks" && r.Method == http.MethodGet:
@@ -417,6 +419,10 @@ func (a *App) handleSaveCompose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.DeployNow {
+		if err := a.ensureNodeCapability(body.NodeID, "compose_deploy"); err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		args := map[string]string{"path": project.Path, "content": project.Content, "name": project.Name}
 		payload, _ := json.Marshal(args)
 		task, err := a.store.CreateTask(Task{
@@ -430,6 +436,56 @@ func (a *App) handleSaveCompose(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			_ = a.hub.EnqueueTask(task)
 		}
+	}
+	writeJSON(w, http.StatusOK, project)
+}
+
+func (a *App) handleImportCompose(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		NodeID  string `json:"node_id"`
+		ID      string `json:"id"`
+		Mode    string `json:"mode"`
+		Content string `json:"content"`
+		Confirm bool   `json:"confirm"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	body.Mode = strings.TrimSpace(body.Mode)
+	if body.NodeID == "" || body.ID == "" {
+		writeError(w, http.StatusBadRequest, "node_id and id are required")
+		return
+	}
+	project, err := a.store.GetComposeProject(body.NodeID, body.ID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "compose project not found")
+		return
+	}
+	if project.Managed {
+		writeError(w, http.StatusBadRequest, "this compose project is already panel-managed")
+		return
+	}
+	switch body.Mode {
+	case "", "read_only":
+		project, err = a.store.ImportComposeProjectReadOnly(body.NodeID, body.ID)
+	case "managed":
+		if !body.Confirm {
+			writeError(w, http.StatusBadRequest, "confirm is required before importing a scanned project as panel-managed")
+			return
+		}
+		project, err = a.store.ImportComposeProjectManaged(body.NodeID, body.ID, body.Content, CurrentUser(r).Username)
+	default:
+		writeError(w, http.StatusBadRequest, "unsupported import mode")
+		return
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "compose project not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, project)
 }
@@ -467,6 +523,10 @@ func (a *App) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unsupported task kind")
 		return
 	}
+	if err := a.ensureNodeCapability(body.NodeID, body.Kind); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	body.Args = a.prepareTaskArgs(r, body.Kind, body.Args)
 	if body.Kind == "agent_update" {
 		body.TargetType = nonEmpty(body.TargetType, "node")
@@ -499,6 +559,51 @@ func allowedTaskKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+func (a *App) ensureNodeCapability(nodeID, kind string) error {
+	required := requiredCapability(kind)
+	if required == "" {
+		return nil
+	}
+	node, err := a.store.GetNode(nodeID)
+	if err != nil {
+		return err
+	}
+	if nodeHasCapability(node.Capabilities, required) {
+		return nil
+	}
+	return fmt.Errorf("节点端未开启此操作能力：%s。请在节点 Agent 环境变量中开启对应 DOCKPILOT_AGENT_ALLOW_* 开关后重启 Agent", required)
+}
+
+func requiredCapability(kind string) string {
+	switch kind {
+	case "detect_updates":
+		return "detect_updates"
+	case "agent_update":
+		return "agent_update"
+	case "compose_update":
+		return "compose_update"
+	case "compose_deploy":
+		return "compose_deploy"
+	case "restart_container":
+		return "restart_container"
+	case "prune_images":
+		return "prune_images"
+	default:
+		return ""
+	}
+}
+
+func nodeHasCapability(raw, capability string) bool {
+	if capability == "detect_updates" {
+		return true
+	}
+	values := map[string]bool{}
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return false
+	}
+	return values[capability]
 }
 
 func (a *App) prepareTaskArgs(r *http.Request, kind string, args map[string]string) map[string]string {

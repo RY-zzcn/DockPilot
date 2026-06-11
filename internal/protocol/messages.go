@@ -57,6 +57,7 @@ type HelloPayload struct {
 	DockerVersion     string            `json:"docker_version,omitempty"`
 	ComposeVersion    string            `json:"compose_version,omitempty"`
 	Labels            map[string]string `json:"labels,omitempty"`
+	Capabilities      map[string]bool   `json:"capabilities,omitempty"`
 }
 
 type HelloAckPayload struct {
@@ -120,11 +121,14 @@ type UpdateDetection struct {
 	ProjectName string                 `json:"project_name,omitempty"`
 	Path        string                 `json:"path,omitempty"`
 	Error       string                 `json:"error,omitempty"`
+	Reason      string                 `json:"reason,omitempty"`
+	Advice      string                 `json:"advice,omitempty"`
 	Images      []ImageUpdateDetection `json:"images"`
 }
 
 type ImageUpdateDetection struct {
 	Image                string `json:"image"`
+	Status               string `json:"status,omitempty"`
 	Platform             string `json:"platform,omitempty"`
 	Method               string `json:"method,omitempty"`
 	LocalDigest          string `json:"local_digest,omitempty"`
@@ -137,6 +141,8 @@ type ImageUpdateDetection struct {
 	CheckedAt            string `json:"checked_at,omitempty"`
 	UpdateAvailable      bool   `json:"update_available"`
 	Error                string `json:"error,omitempty"`
+	Reason               string `json:"reason,omitempty"`
+	Advice               string `json:"advice,omitempty"`
 }
 
 type TaskPayload struct {

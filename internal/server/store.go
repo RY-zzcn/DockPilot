@@ -59,6 +59,7 @@ type Node struct {
 	Status         string `json:"status"`
 	LastSeen       string `json:"last_seen"`
 	Labels         string `json:"labels"`
+	Capabilities   string `json:"capabilities"`
 	NameCustom     bool   `json:"-"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
@@ -106,6 +107,8 @@ type ComposeProject struct {
 	Name              string `json:"name"`
 	Path              string `json:"path"`
 	Managed           bool   `json:"managed"`
+	Ownership         string `json:"ownership"`
+	Imported          bool   `json:"imported"`
 	Content           string `json:"content,omitempty"`
 	Version           int    `json:"version"`
 	UpdateAvailable   bool   `json:"update_available"`
@@ -155,14 +158,17 @@ type UpdateRecord struct {
 }
 
 type Policy struct {
-	ID              string `json:"id"`
-	Scope           string `json:"scope"`
-	ScopeID         string `json:"scope_id"`
-	Mode            string `json:"mode"`
-	Schedule        string `json:"schedule"`
-	ExcludePatterns string `json:"exclude_patterns"`
-	Enabled         bool   `json:"enabled"`
-	UpdatedAt       string `json:"updated_at"`
+	ID                string `json:"id"`
+	Scope             string `json:"scope"`
+	ScopeID           string `json:"scope_id"`
+	Mode              string `json:"mode"`
+	Schedule          string `json:"schedule"`
+	MaintenanceWindow string `json:"maintenance_window"`
+	HealthcheckURL    string `json:"healthcheck_url"`
+	RollbackOnFailure bool   `json:"rollback_on_failure"`
+	ExcludePatterns   string `json:"exclude_patterns"`
+	Enabled           bool   `json:"enabled"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 type Notification struct {
@@ -246,6 +252,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   status TEXT NOT NULL DEFAULT 'offline',
   last_seen TEXT NOT NULL DEFAULT '',
   labels TEXT NOT NULL DEFAULT '{}',
+  capabilities TEXT NOT NULL DEFAULT '{}',
   name_custom INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -298,6 +305,8 @@ CREATE TABLE IF NOT EXISTS compose_projects (
   name TEXT NOT NULL,
   path TEXT NOT NULL,
   managed INTEGER NOT NULL DEFAULT 0,
+  ownership TEXT NOT NULL DEFAULT 'scanned',
+  imported INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL DEFAULT '',
   version INTEGER NOT NULL DEFAULT 1,
   update_available INTEGER NOT NULL DEFAULT 0,
@@ -367,6 +376,9 @@ CREATE TABLE IF NOT EXISTS policies (
   scope_id TEXT NOT NULL DEFAULT '',
   mode TEXT NOT NULL CHECK(mode IN ('manual','scheduled','automatic')),
   schedule TEXT NOT NULL DEFAULT '',
+  maintenance_window TEXT NOT NULL DEFAULT '',
+  healthcheck_url TEXT NOT NULL DEFAULT '',
+  rollback_on_failure INTEGER NOT NULL DEFAULT 0,
   exclude_patterns TEXT NOT NULL DEFAULT '',
   enabled INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -412,6 +424,15 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 	if err := s.ensureColumn("nodes", "name_custom", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("nodes", "capabilities", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "ownership", "TEXT NOT NULL DEFAULT 'scanned'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "imported", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("compose_projects", "update_available", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
@@ -427,7 +448,16 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 	if err := s.ensureColumn("compose_projects", "detection_platform", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.ensureColumn("compose_projects", "detection_error", "TEXT NOT NULL DEFAULT ''")
+	if err := s.ensureColumn("compose_projects", "detection_error", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("policies", "maintenance_window", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("policies", "healthcheck_url", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.ensureColumn("policies", "rollback_on_failure", "INTEGER NOT NULL DEFAULT 0")
 }
 
 func (s *Store) ensureColumn(table, column, definition string) error {
@@ -541,9 +571,10 @@ func (s *Store) UpsertNodeFromHello(hello protocol.HelloPayload, fallbackID stri
 		created = true
 	}
 	labels, _ := json.Marshal(hello.Labels)
+	capabilities, _ := json.Marshal(hello.Capabilities)
 	res, err := s.db.Exec(`
-INSERT INTO nodes(id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, created_at, updated_at)
-VALUES(?,?,?,?,?,?,?,?, 'online', datetime('now','localtime'), ?, datetime('now','localtime'), datetime('now','localtime'))
+INSERT INTO nodes(id, name, token, version, os, arch, docker_version, compose_version, status, last_seen, labels, capabilities, created_at, updated_at)
+VALUES(?,?,?,?,?,?,?,?, 'online', datetime('now','localtime'), ?, ?, datetime('now','localtime'), datetime('now','localtime'))
 ON CONFLICT(id) DO UPDATE SET
   name = CASE WHEN nodes.name_custom = 1 THEN nodes.name ELSE excluded.name END,
   version = excluded.version,
@@ -554,8 +585,9 @@ ON CONFLICT(id) DO UPDATE SET
   status = 'online',
   last_seen = datetime('now','localtime'),
   labels = excluded.labels,
+  capabilities = excluded.capabilities,
   updated_at = datetime('now','localtime')
-`, nodeID, nonEmpty(hello.Name, nodeID), token, hello.Version, hello.OS, hello.Arch, hello.DockerVersion, hello.ComposeVersion, string(labels))
+`, nodeID, nonEmpty(hello.Name, nodeID), token, hello.Version, hello.OS, hello.Arch, hello.DockerVersion, hello.ComposeVersion, string(labels), string(capabilities))
 	if err != nil {
 		return Node{}, false, err
 	}
@@ -606,20 +638,20 @@ func (s *Store) reusableNodeID(hello protocol.HelloPayload) (string, bool, error
 
 func (s *Store) AuthenticateNode(nodeID, token string) (Node, error) {
 	var node Node
-	err := s.db.QueryRow(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes WHERE id = ? AND token = ?`, nodeID, token).
-		Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, capabilities, name_custom, created_at, updated_at FROM nodes WHERE id = ? AND token = ?`, nodeID, token).
+		Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.Capabilities, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt)
 	return node, err
 }
 
 func (s *Store) GetNode(id string) (Node, error) {
 	var node Node
-	err := s.db.QueryRow(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes WHERE id = ?`, id).
-		Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, capabilities, name_custom, created_at, updated_at FROM nodes WHERE id = ?`, id).
+		Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.Capabilities, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt)
 	return node, err
 }
 
 func (s *Store) ListNodes() ([]Node, error) {
-	rows, err := s.db.Query(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, capabilities, name_custom, created_at, updated_at FROM nodes ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -627,7 +659,7 @@ func (s *Store) ListNodes() ([]Node, error) {
 	nodes := []Node{}
 	for rows.Next() {
 		var node Node
-		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.Capabilities, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt); err != nil {
 			return nil, err
 		}
 		nodes = append(nodes, node)
@@ -680,7 +712,7 @@ func (s *Store) MarkNodeSeen(nodeID, status string) error {
 
 func (s *Store) MarkStaleNodesOffline(timeout time.Duration) ([]Node, error) {
 	cutoff := time.Now().In(time.Local).Add(-timeout).Format("2006-01-02 15:04:05")
-	rows, err := s.db.Query(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, name_custom, created_at, updated_at FROM nodes WHERE status = 'online' AND last_seen < ?`, cutoff)
+	rows, err := s.db.Query(`SELECT id, name, token, note, version, os, arch, docker_version, compose_version, status, last_seen, labels, capabilities, name_custom, created_at, updated_at FROM nodes WHERE status = 'online' AND last_seen < ?`, cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -688,7 +720,7 @@ func (s *Store) MarkStaleNodesOffline(timeout time.Duration) ([]Node, error) {
 	stale := []Node{}
 	for rows.Next() {
 		var node Node
-		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt); err != nil {
+		if err := rows.Scan(&node.ID, &node.Name, &node.Token, &node.Note, &node.Version, &node.OS, &node.Arch, &node.DockerVersion, &node.ComposeVersion, &node.Status, &node.LastSeen, &node.Labels, &node.Capabilities, boolScanner(&node.NameCustom), &node.CreatedAt, &node.UpdatedAt); err != nil {
 			return nil, err
 		}
 		stale = append(stale, node)
@@ -766,17 +798,26 @@ VALUES(?,?,?,?,?,?,datetime('now','localtime'))`,
 		if !project.Managed {
 			content = ""
 		}
+		ownership := "scanned"
+		if project.Managed {
+			ownership = "managed"
+		}
 		_, err := tx.Exec(`
-INSERT INTO compose_projects(id, node_id, name, path, managed, content, last_seen, updated_at)
-VALUES(?,?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
+INSERT INTO compose_projects(id, node_id, name, path, managed, ownership, imported, content, last_seen, updated_at)
+VALUES(?,?,?,?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
 ON CONFLICT(node_id, id) DO UPDATE SET
   name = excluded.name,
   path = excluded.path,
   content = CASE WHEN compose_projects.managed = 1 THEN compose_projects.content ELSE excluded.content END,
   managed = CASE WHEN compose_projects.managed = 1 THEN 1 ELSE excluded.managed END,
+  ownership = CASE
+    WHEN compose_projects.managed = 1 THEN compose_projects.ownership
+    WHEN compose_projects.imported = 1 THEN compose_projects.ownership
+    ELSE excluded.ownership
+  END,
   last_seen = datetime('now','localtime'),
   updated_at = datetime('now','localtime')`,
-			project.ID, nodeID, project.Name, project.Path, boolInt(project.Managed), content)
+			project.ID, nodeID, project.Name, project.Path, boolInt(project.Managed), ownership, 0, content)
 		if err != nil {
 			return err
 		}
@@ -935,7 +976,7 @@ func (s *Store) DockerState(nodeID string) (DockerState, error) {
 	if err != nil {
 		return state, err
 	}
-	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
+	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, ownership, imported, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
 	if err != nil {
 		return state, err
 	}
@@ -967,12 +1008,14 @@ func (s *Store) SaveComposeProject(nodeID, projectID, name, path, content, usern
 		}
 	}
 	_, err = tx.Exec(`
-INSERT INTO compose_projects(id, node_id, name, path, managed, content, version, last_seen, updated_at)
-VALUES(?,?,?,?,1,?,1,datetime('now','localtime'),datetime('now','localtime'))
+INSERT INTO compose_projects(id, node_id, name, path, managed, ownership, imported, content, version, last_seen, updated_at)
+VALUES(?,?,?,?,1,'managed',0,?,1,datetime('now','localtime'),datetime('now','localtime'))
 ON CONFLICT(node_id, id) DO UPDATE SET
   name = excluded.name,
   path = excluded.path,
   managed = 1,
+  ownership = 'managed',
+  imported = 0,
   content = excluded.content,
   version = compose_projects.version + 1,
   updated_at = datetime('now','localtime')`,
@@ -986,17 +1029,72 @@ ON CONFLICT(node_id, id) DO UPDATE SET
 	return s.GetComposeProject(nodeID, projectID)
 }
 
+func (s *Store) ImportComposeProjectReadOnly(nodeID, projectID string) (ComposeProject, error) {
+	res, err := s.db.Exec(`
+UPDATE compose_projects
+SET ownership = 'imported',
+    imported = 1,
+    managed = 0,
+    content = '',
+    updated_at = datetime('now','localtime')
+WHERE node_id = ? AND id = ? AND managed = 0`, nodeID, projectID)
+	if err != nil {
+		return ComposeProject{}, err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ComposeProject{}, sql.ErrNoRows
+	}
+	return s.GetComposeProject(nodeID, projectID)
+}
+
+func (s *Store) ImportComposeProjectManaged(nodeID, projectID, content, username string) (ComposeProject, error) {
+	if strings.TrimSpace(content) == "" {
+		return ComposeProject{}, errors.New("compose content is required when importing as panel-managed")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return ComposeProject{}, err
+	}
+	defer tx.Rollback()
+	var oldContent string
+	_ = tx.QueryRow(`SELECT content FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).Scan(&oldContent)
+	if oldContent != "" {
+		if _, err := tx.Exec(`INSERT INTO compose_revisions(project_id, node_id, content, created_at, created_by) VALUES(?,?,?,datetime('now','localtime'),?)`, projectID, nodeID, oldContent, username); err != nil {
+			return ComposeProject{}, err
+		}
+	}
+	res, err := tx.Exec(`
+UPDATE compose_projects
+SET ownership = 'managed',
+    imported = 0,
+    managed = 1,
+    content = ?,
+    version = version + 1,
+    updated_at = datetime('now','localtime')
+WHERE node_id = ? AND id = ? AND managed = 0`, content, nodeID, projectID)
+	if err != nil {
+		return ComposeProject{}, err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ComposeProject{}, sql.ErrNoRows
+	}
+	if err := tx.Commit(); err != nil {
+		return ComposeProject{}, err
+	}
+	return s.GetComposeProject(nodeID, projectID)
+}
+
 func (s *Store) GetComposeProject(nodeID, projectID string) (ComposeProject, error) {
 	var project ComposeProject
-	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
-		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, ownership, imported, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
+		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
 func (s *Store) GetComposeProjectByPath(nodeID, path string) (ComposeProject, error) {
 	var project ComposeProject
-	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND path = ? ORDER BY managed DESC, updated_at DESC LIMIT 1`, nodeID, path).
-		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, ownership, imported, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND path = ? ORDER BY managed DESC, updated_at DESC LIMIT 1`, nodeID, path).
+		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
@@ -1190,7 +1288,7 @@ SELECT id FROM update_records ORDER BY id DESC LIMIT -1 OFFSET ?
 }
 
 func (s *Store) ListPolicies() ([]Policy, error) {
-	rows, err := s.db.Query(`SELECT id, scope, scope_id, mode, schedule, exclude_patterns, enabled, updated_at FROM policies ORDER BY scope, scope_id`)
+	rows, err := s.db.Query(`SELECT id, scope, scope_id, mode, schedule, maintenance_window, healthcheck_url, rollback_on_failure, exclude_patterns, enabled, updated_at FROM policies ORDER BY scope, scope_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -1198,7 +1296,7 @@ func (s *Store) ListPolicies() ([]Policy, error) {
 	policies := []Policy{}
 	for rows.Next() {
 		var policy Policy
-		if err := rows.Scan(&policy.ID, &policy.Scope, &policy.ScopeID, &policy.Mode, &policy.Schedule, &policy.ExcludePatterns, boolScanner(&policy.Enabled), &policy.UpdatedAt); err != nil {
+		if err := rows.Scan(&policy.ID, &policy.Scope, &policy.ScopeID, &policy.Mode, &policy.Schedule, &policy.MaintenanceWindow, &policy.HealthcheckURL, boolScanner(&policy.RollbackOnFailure), &policy.ExcludePatterns, boolScanner(&policy.Enabled), &policy.UpdatedAt); err != nil {
 			return nil, err
 		}
 		policies = append(policies, policy)
@@ -1208,8 +1306,8 @@ func (s *Store) ListPolicies() ([]Policy, error) {
 
 func (s *Store) getPolicy(scope, scopeID string) (Policy, error) {
 	var policy Policy
-	err := s.db.QueryRow(`SELECT id, scope, scope_id, mode, schedule, exclude_patterns, enabled, updated_at FROM policies WHERE scope = ? AND scope_id = ?`, scope, scopeID).
-		Scan(&policy.ID, &policy.Scope, &policy.ScopeID, &policy.Mode, &policy.Schedule, &policy.ExcludePatterns, boolScanner(&policy.Enabled), &policy.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, scope, scope_id, mode, schedule, maintenance_window, healthcheck_url, rollback_on_failure, exclude_patterns, enabled, updated_at FROM policies WHERE scope = ? AND scope_id = ?`, scope, scopeID).
+		Scan(&policy.ID, &policy.Scope, &policy.ScopeID, &policy.Mode, &policy.Schedule, &policy.MaintenanceWindow, &policy.HealthcheckURL, boolScanner(&policy.RollbackOnFailure), &policy.ExcludePatterns, boolScanner(&policy.Enabled), &policy.UpdatedAt)
 	return policy, err
 }
 
@@ -1224,15 +1322,18 @@ func (s *Store) UpsertPolicy(policy Policy) (Policy, error) {
 		policy.Schedule = DefaultPolicySchedule
 	}
 	_, err := s.db.Exec(`
-INSERT INTO policies(id, scope, scope_id, mode, schedule, exclude_patterns, enabled, updated_at)
-VALUES(?,?,?,?,?,?,?,datetime('now','localtime'))
+INSERT INTO policies(id, scope, scope_id, mode, schedule, maintenance_window, healthcheck_url, rollback_on_failure, exclude_patterns, enabled, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))
 ON CONFLICT(scope, scope_id) DO UPDATE SET
   mode = excluded.mode,
   schedule = excluded.schedule,
+  maintenance_window = excluded.maintenance_window,
+  healthcheck_url = excluded.healthcheck_url,
+  rollback_on_failure = excluded.rollback_on_failure,
   exclude_patterns = excluded.exclude_patterns,
   enabled = excluded.enabled,
   updated_at = datetime('now','localtime')`,
-		policy.ID, policy.Scope, policy.ScopeID, policy.Mode, policy.Schedule, policy.ExcludePatterns, boolInt(policy.Enabled))
+		policy.ID, policy.Scope, policy.ScopeID, policy.Mode, policy.Schedule, policy.MaintenanceWindow, policy.HealthcheckURL, boolInt(policy.RollbackOnFailure), policy.ExcludePatterns, boolInt(policy.Enabled))
 	if err != nil {
 		return Policy{}, err
 	}
@@ -1418,7 +1519,16 @@ func scanImage(rows *sql.Rows) (Image, error) {
 
 func scanComposeProject(rows *sql.Rows) (ComposeProject, error) {
 	var project ComposeProject
-	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	if project.Ownership == "" {
+		if project.Managed {
+			project.Ownership = "managed"
+		} else if project.Imported {
+			project.Ownership = "imported"
+		} else {
+			project.Ownership = "scanned"
+		}
+	}
 	return project, err
 }
 
@@ -1444,6 +1554,12 @@ func taskPayloadArg(payload, key string) string {
 
 func detectionSummary(detection protocol.UpdateDetection) (status, method, platform, message string) {
 	message = detection.Error
+	if detection.Reason != "" {
+		message = detection.Reason
+		if detection.Advice != "" {
+			message += "；建议：" + detection.Advice
+		}
+	}
 	checkedImages := 0
 	failedImages := 0
 	updateAvailable := false
@@ -1457,7 +1573,14 @@ func detectionSummary(detection protocol.UpdateDetection) (status, method, platf
 		if image.Error != "" {
 			failedImages++
 			if message == "" {
-				message = image.Image + ": " + image.Error
+				if image.Reason != "" {
+					message = image.Image + ": " + image.Reason
+					if image.Advice != "" {
+						message += "；建议：" + image.Advice
+					}
+				} else {
+					message = image.Image + ": " + image.Error
+				}
 			}
 			continue
 		}

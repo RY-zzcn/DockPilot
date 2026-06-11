@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,19 +17,23 @@ import (
 )
 
 type TaskExecutor struct {
-	Docker            DockerClient
-	Detector          *UpdateDetector
-	ServerURL         string
-	RegistrationToken string
-	NodeName          string
-	ComposeDirs       []string
-	MetricsInterval   time.Duration
-	SnapshotInterval  time.Duration
-	UpdateCacheTTL    time.Duration
-	InstallMode       string
-	ReleaseRepo       string
-	AgentImage        string
-	AllowDeploy       bool
+	Docker             DockerClient
+	Detector           *UpdateDetector
+	ServerURL          string
+	RegistrationToken  string
+	NodeName           string
+	ComposeDirs        []string
+	MetricsInterval    time.Duration
+	SnapshotInterval   time.Duration
+	UpdateCacheTTL     time.Duration
+	InstallMode        string
+	ReleaseRepo        string
+	AgentImage         string
+	AllowAgentUpdate   bool
+	AllowComposeUpdate bool
+	AllowDeploy        bool
+	AllowRestart       bool
+	AllowImagePrune    bool
 }
 
 func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, logLine func(string)) protocol.TaskResultPayload {
@@ -40,6 +45,12 @@ func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, lo
 	}
 	var err error
 	restartAgent := false
+	if err = t.requireCapability(task.Kind); err != nil {
+		status.Status = "failed"
+		status.Message = err.Error()
+		status.ExitCode = 1
+		return status
+	}
 	switch task.Kind {
 	case "detect_updates":
 		var updates []protocol.UpdateDetection
@@ -71,6 +82,34 @@ func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, lo
 	status.RestartAgent = restartAgent
 	status.Message = "completed"
 	return status
+}
+
+func (t TaskExecutor) requireCapability(kind string) error {
+	allowed := true
+	var hint string
+	switch kind {
+	case "detect_updates":
+		allowed = true
+	case "agent_update":
+		allowed = t.AllowAgentUpdate
+		hint = "set DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE=true on the node to allow panel-triggered agent updates"
+	case "compose_update":
+		allowed = t.AllowComposeUpdate
+		hint = "set DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE=true on the node to allow server-initiated Compose updates"
+	case "compose_deploy":
+		allowed = t.AllowDeploy
+		hint = "set DOCKPILOT_AGENT_ALLOW_DEPLOY=true on the node to allow server-initiated Compose deploys"
+	case "restart_container":
+		allowed = t.AllowRestart
+		hint = "set DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART=true on the node to allow container restarts"
+	case "prune_images":
+		allowed = t.AllowImagePrune
+		hint = "set DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE=true on the node to allow Docker image pruning"
+	}
+	if allowed {
+		return nil
+	}
+	return fmt.Errorf("agent capability %q is disabled locally; %s", kind, hint)
 }
 
 func (t TaskExecutor) detectUpdates(ctx context.Context, task protocol.TaskPayload, logLine func(string)) ([]protocol.UpdateDetection, error) {
@@ -115,6 +154,8 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 	if !t.pathAllowed(path) {
 		err := fmt.Errorf("compose file is outside agent allowed directories: %s", path)
 		detection.Error = err.Error()
+		detection.Reason = "Compose 文件不在 Agent 允许扫描的目录内"
+		detection.Advice = "请在节点端调整 DOCKPILOT_COMPOSE_DIRS，或把项目放到允许目录后再检测"
 		return detection, err
 	}
 	images, err := composeImages(ctx, path)
@@ -122,9 +163,11 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 		runtimeImages := composeRuntimeImages(ctx, name)
 		if len(runtimeImages) == 0 {
 			detection.Error = err.Error()
+			detection.Reason, detection.Advice = friendlyDetectionFailure(err.Error())
 			return detection, err
 		}
 		detection.Error = err.Error()
+		detection.Reason, detection.Advice = friendlyDetectionFailure(err.Error())
 		images = runtimeImages
 		logLine("Compose config check failed; falling back to images from existing project containers: " + err.Error())
 	} else {
@@ -142,6 +185,7 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 	failedImages := 0
 	for _, image := range images {
 		item := detector.Detect(ctx, image)
+		item.Status, item.Reason, item.Advice = imageDetectionStatus(item)
 		detection.Images = append(detection.Images, item)
 		switch {
 		case item.Pinned:
@@ -161,6 +205,10 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 			detection.Error += "; " + imageError
 		} else {
 			detection.Error = imageError
+		}
+		if detection.Reason == "" {
+			detection.Reason = "部分镜像无法完成更新检测"
+			detection.Advice = "请查看失败镜像的原因；常见原因包括私有仓库未登录、网络超时、镜像标签不存在或 registry 权限不足"
 		}
 	}
 	return detection, nil
@@ -190,6 +238,18 @@ func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPaylo
 	if err := composePreflight(ctx, path); err != nil {
 		return nil, err
 	}
+	healthURL := strings.TrimSpace(task.Args["healthcheck_url"])
+	rollbackEnabled := taskBool(task.Args, "rollback_on_failure")
+	if healthURL != "" {
+		logLine("Running pre-update health check: " + healthURL)
+		if err := checkHealthURL(ctx, healthURL); err != nil {
+			return nil, fmt.Errorf("pre-update health check failed: %w", err)
+		}
+	}
+	beforeState, beforeStateErr := composeContainerImageState(ctx, path)
+	if beforeStateErr != nil {
+		logLine("Unable to read current compose container image references before update: " + beforeStateErr.Error())
+	}
 	before, beforeErr := composeContainerImageIDs(ctx, path)
 	if beforeErr != nil {
 		logLine("Unable to read current compose container images before update: " + beforeErr.Error())
@@ -213,6 +273,20 @@ func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPaylo
 	}
 	if err != nil {
 		return nil, err
+	}
+	if healthURL != "" {
+		logLine("Running post-update health check: " + healthURL)
+		if err := checkHealthURL(ctx, healthURL); err != nil {
+			logLine("Post-update health check failed: " + err.Error())
+			if rollbackEnabled {
+				logLine("Rollback requested; restoring previous image IDs where possible.")
+				if rollbackErr := rollbackComposeImages(ctx, projectDir, path, beforeState, logLine); rollbackErr != nil {
+					return nil, fmt.Errorf("post-update health check failed and rollback failed: %w; rollback: %v", err, rollbackErr)
+				}
+				return nil, fmt.Errorf("post-update health check failed; previous images were restored where possible: %w", err)
+			}
+			return nil, fmt.Errorf("post-update health check failed: %w", err)
+		}
 	}
 	after, afterErr := composeContainerImageIDs(ctx, path)
 	if afterErr != nil {
@@ -451,6 +525,55 @@ func commandCombinedInDir(ctx context.Context, dir string, name string, args ...
 	return string(out), err
 }
 
+type composeContainerImage struct {
+	Name    string
+	Ref     string
+	ImageID string
+	Service string
+	Project string
+}
+
+func composeContainerImageState(ctx context.Context, path string) (map[string]composeContainerImage, error) {
+	path = composeFilePath(path)
+	projectDir := composeProjectDir(path)
+	args := append([]string{"compose"}, composeFileArgs(path)...)
+	args = append(args, "ps", "-q")
+	out, err := commandStdoutInDir(ctx, projectDir, "docker", args...)
+	if err != nil {
+		return nil, fmt.Errorf("compose ps: %w: %s", err, compactOutput(out))
+	}
+	ids := strings.Fields(out)
+	if len(ids) == 0 {
+		return map[string]composeContainerImage{}, nil
+	}
+	inspectArgs := append([]string{"inspect", "--format", "{{.Name}}={{.Config.Image}}={{.Image}}={{index .Config.Labels \"com.docker.compose.service\"}}={{index .Config.Labels \"com.docker.compose.project\"}}"}, ids...)
+	out, err = commandStdout(ctx, "docker", inspectArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("container inspect: %w: %s", err, compactOutput(out))
+	}
+	images := map[string]composeContainerImage{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 5)
+		if len(parts) < 3 {
+			continue
+		}
+		name := strings.TrimPrefix(parts[0], "/")
+		item := composeContainerImage{Name: name, Ref: parts[1], ImageID: parts[2]}
+		if len(parts) > 3 {
+			item.Service = parts[3]
+		}
+		if len(parts) > 4 {
+			item.Project = parts[4]
+		}
+		images[name] = item
+	}
+	return images, nil
+}
+
 func composeContainerImageIDs(ctx context.Context, path string) (map[string]string, error) {
 	path = composeFilePath(path)
 	projectDir := composeProjectDir(path)
@@ -483,6 +606,60 @@ func composeContainerImageIDs(ctx context.Context, path string) (map[string]stri
 		images[name] = parts[1]
 	}
 	return images, nil
+}
+
+func checkHealthURL(ctx context.Context, rawURL string) error {
+	client := http.Client{Timeout: 15 * time.Second}
+	var lastErr error
+	for attempt := 1; attempt <= 6; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				return nil
+			}
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+	return lastErr
+}
+
+func rollbackComposeImages(ctx context.Context, projectDir, path string, before map[string]composeContainerImage, logLine func(string)) error {
+	if len(before) == 0 {
+		return fmt.Errorf("no previous compose containers were available for rollback")
+	}
+	tagged := 0
+	for _, item := range before {
+		ref := strings.TrimSpace(item.Ref)
+		imageID := strings.TrimSpace(item.ImageID)
+		if ref == "" || imageID == "" || strings.Contains(ref, "@sha256:") {
+			continue
+		}
+		if err := runLogged(ctx, logLine, "docker", "tag", imageID, ref); err != nil {
+			return fmt.Errorf("retag %s as %s: %w", shortContainerImageID(imageID), ref, err)
+		}
+		tagged++
+	}
+	if tagged == 0 {
+		return fmt.Errorf("previous image references could not be safely retagged")
+	}
+	args := append([]string{"compose"}, composeFileArgs(path)...)
+	args = append(args, "up", "-d", "--remove-orphans", "--force-recreate")
+	if _, err := runLoggedInDir(ctx, projectDir, logLine, "docker", args...); err != nil {
+		return err
+	}
+	return nil
 }
 
 func composeImageChanges(task protocol.TaskPayload, before, after map[string]string) []protocol.ImageChange {
@@ -520,6 +697,49 @@ func logComposeImageChanges(logLine func(string), changes []protocol.ImageChange
 	}
 	if changed == 0 {
 		logLine("Compose update completed; container image IDs did not change. The project may already be current, use build-only images, or use fixed tags/digests.")
+	}
+}
+
+func taskBool(args map[string]string, key string) bool {
+	switch strings.ToLower(strings.TrimSpace(args[key])) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func imageDetectionStatus(item protocol.ImageUpdateDetection) (status, reason, advice string) {
+	if item.Error != "" {
+		reason, advice = friendlyDetectionFailure(item.Error)
+		return "failed", reason, advice
+	}
+	if item.Pinned {
+		return "pinned", "镜像使用 digest 固定版本", "固定 digest 的镜像不会按标签检测更新；如需自动更新，请改用可更新标签"
+	}
+	if item.UpdateAvailable {
+		return "update_available", "远端镜像摘要已变化", "可以在维护窗口内执行更新，并保留更新记录便于回溯"
+	}
+	return "current", "本地镜像与远端镜像一致", "无需处理"
+}
+
+func friendlyDetectionFailure(message string) (reason, advice string) {
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "no such host") || strings.Contains(lower, "connection refused") || strings.Contains(lower, "timeout") || strings.Contains(lower, "i/o timeout"):
+		return "节点无法连接镜像仓库或网络超时", "请检查节点 DNS、网络出口、防火墙或 registry 地址是否可访问"
+	case strings.Contains(lower, "unauthorized") || strings.Contains(lower, "authentication required") || strings.Contains(lower, "denied") || strings.Contains(lower, "forbidden"):
+		return "镜像仓库需要登录或当前账号没有权限", "请在节点机执行 docker login，或确认镜像仓库权限和访问令牌"
+	case strings.Contains(lower, "not found") || strings.Contains(lower, "manifest unknown") || strings.Contains(lower, "name unknown"):
+		return "镜像或标签在仓库中不存在", "请确认 Compose 中的镜像名和 tag 是否正确；1Panel 应用模板目录可忽略"
+	case strings.Contains(lower, "invalid mount config") || strings.Contains(lower, ":/www") || strings.Contains(lower, "variable is not set"):
+		return "Compose 配置缺少环境变量，导致挂载或配置无效", "请在项目目录补齐 .env，或在 1Panel 中修复应用变量后再检测"
+	case strings.Contains(lower, "compose preflight") || strings.Contains(lower, "read compose"):
+		return "Compose 文件无法被 Docker Compose 正常解析", "请在节点机项目目录运行 docker compose config 查看具体错误"
+	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "too many requests"):
+		return "镜像仓库触发访问频率限制", "请稍后重试，或登录镜像仓库账号提高访问额度"
+	default:
+		return "检测过程中出现未知错误", "请查看任务日志中的原始错误；如果是私有镜像，请先确认节点机可 docker pull 该镜像"
 	}
 }
 

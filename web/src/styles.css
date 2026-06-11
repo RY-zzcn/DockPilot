@@ -916,7 +916,7 @@ textarea {
 
 .update-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 210px minmax(128px, 0.5fr) minmax(128px, 0.5fr) auto;
+  grid-template-columns: minmax(220px, 1.1fr) minmax(200px, 0.72fr) repeat(3, minmax(120px, 0.56fr)) auto;
   gap: 10px;
   align-items: center;
   border: 1px solid var(--line);
@@ -927,8 +927,16 @@ textarea {
 
 .update-main {
   display: grid;
+  grid-row: span 2;
   min-width: 0;
   gap: 4px;
+}
+
+.update-main span,
+.update-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .segmented {
@@ -959,6 +967,30 @@ textarea {
 
 .schedule-input {
   min-width: 0;
+}
+
+.update-row .segmented {
+  grid-row: span 2;
+}
+
+.update-row .schedule-input:nth-of-type(4) {
+  grid-column: 3 / span 2;
+}
+
+.update-row .compact-check,
+.update-row .compact-actions {
+  grid-column: span 1;
+}
+
+.compact-check {
+  min-height: 40px;
+  align-self: stretch;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--surface);
+  white-space: nowrap;
 }
 
 .task-layout {
@@ -1015,8 +1047,13 @@ textarea {
   min-height: 44px;
 }
 
+.attention-line {
+  grid-template-columns: auto minmax(0, 0.72fr) minmax(0, 1.28fr);
+  min-height: 50px;
+}
+
 .task-line small {
-  grid-column: 2;
+  grid-column: 2 / -1;
 }
 
 .task-main {
@@ -1097,6 +1134,17 @@ textarea {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.empty-hint {
+  margin: 0;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .fact-grid {
@@ -1192,6 +1240,53 @@ textarea {
 .checkline input {
   width: 16px;
   min-height: 16px;
+}
+
+.capability-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capability-chip {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.capability-chip.enabled {
+  border-color: rgba(21, 122, 83, 0.28);
+  background: rgba(21, 122, 83, 0.08);
+  color: var(--green);
+}
+
+.inline-link {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  margin-left: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: var(--surface);
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.inline-link:hover {
+  border-color: var(--cyan);
+}
+
+.danger-link {
+  color: var(--rose);
 }
 
 .user-list {
@@ -1355,6 +1450,10 @@ small,
   line-height: 1.45;
 }
 
+.security-note .inline-link {
+  vertical-align: middle;
+}
+
 .toast-stack {
   display: grid;
   position: fixed;
@@ -1440,6 +1539,16 @@ small,
 
   .update-row {
     grid-template-columns: 1fr;
+  }
+
+  .update-row .schedule-input,
+  .update-row .compact-check,
+  .update-row .compact-actions {
+    grid-column: auto;
+  }
+
+  .attention-line {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 }
 

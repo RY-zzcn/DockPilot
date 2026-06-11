@@ -82,6 +82,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body)
     }),
+  importCompose: (body: { node_id: string; id: string; mode: 'read_only' | 'managed'; content?: string; confirm?: boolean }) =>
+    request<ComposeProject>('/api/docker/compose/import', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    }),
   tasks: async () => asArray(await request<Task[] | null>('/api/tasks?limit=100')),
   createTask: (body: {
     node_id: string

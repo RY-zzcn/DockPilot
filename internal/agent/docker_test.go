@@ -5,8 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/dockpilot/dockpilot/internal/protocol"
 )
 
 func TestAgentURL(t *testing.T) {
@@ -27,6 +30,32 @@ func TestParseLabels(t *testing.T) {
 	}
 }
 
+func TestConfigCapabilitiesDefaultDangerousOperationsOff(t *testing.T) {
+	capabilities := Config{}.Capabilities()
+	if !capabilities["detect_updates"] || !capabilities["docker_snapshot"] || !capabilities["metrics"] {
+		t.Fatalf("read-only capabilities should be enabled: %#v", capabilities)
+	}
+	for _, key := range []string{"agent_update", "compose_update", "compose_deploy", "restart_container", "prune_images"} {
+		if capabilities[key] {
+			t.Fatalf("dangerous capability %s should default to disabled: %#v", key, capabilities)
+		}
+	}
+}
+
+func TestTaskExecutorRejectsDisabledDangerousTask(t *testing.T) {
+	result := TaskExecutor{}.Execute(context.Background(), protocolTask("compose_update"), func(string) {})
+	if result.Status != "failed" || !strings.Contains(result.Message, "DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE") {
+		t.Fatalf("compose_update should be locally gated, got %#v", result)
+	}
+}
+
+func TestFriendlyDetectionFailureExplains1PanelEnvIssue(t *testing.T) {
+	reason, advice := friendlyDetectionFailure("variable WEBSITE_DIR is not set and mount becomes :/www")
+	if !strings.Contains(reason, "环境变量") || !strings.Contains(advice, "1Panel") {
+		t.Fatalf("expected 1Panel/env friendly explanation, got %q / %q", reason, advice)
+	}
+}
+
 func TestComposeFileArgsUseProjectDirectory(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "compose.yml")
@@ -42,6 +71,14 @@ func TestComposeFileArgsUseProjectDirectory(t *testing.T) {
 		if args[i] != want[i] {
 			t.Fatalf("composeFileArgs[%d] = %q, want %q", i, args[i], want[i])
 		}
+	}
+}
+
+func protocolTask(kind string) protocol.TaskPayload {
+	return protocol.TaskPayload{
+		ID:   "task-1",
+		Kind: kind,
+		Args: map[string]string{"path": "/opt/app/compose.yml"},
 	}
 }
 

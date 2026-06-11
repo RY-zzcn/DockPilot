@@ -85,6 +85,7 @@ func (c *Client) connectOnce(ctx context.Context) error {
 		DockerVersion:     c.docker.DockerVersion(ctx),
 		ComposeVersion:    c.docker.ComposeVersion(ctx),
 		Labels:            labels,
+		Capabilities:      c.cfg.Capabilities(),
 	}
 	msg, _ := protocol.NewMessage(protocol.TypeHello, c.cfg.NodeID, hello)
 	if err := send(msg); err != nil {
@@ -184,19 +185,23 @@ func (c *Client) sendSnapshot(ctx context.Context, send func(protocol.Message) e
 
 func (c *Client) handleTask(ctx context.Context, task protocol.TaskPayload, send func(protocol.Message) error) {
 	executor := TaskExecutor{
-		Docker:            c.docker,
-		Detector:          c.detector,
-		ServerURL:         c.cfg.ServerURL,
-		RegistrationToken: c.cfg.RegistrationToken,
-		NodeName:          c.cfg.Name,
-		ComposeDirs:       c.cfg.ComposeDirs,
-		MetricsInterval:   c.cfg.MetricsInterval,
-		SnapshotInterval:  c.cfg.SnapshotInterval,
-		UpdateCacheTTL:    c.cfg.UpdateCacheTTL,
-		InstallMode:       c.cfg.InstallMode,
-		ReleaseRepo:       c.cfg.ReleaseRepo,
-		AgentImage:        c.cfg.AgentImage,
-		AllowDeploy:       c.cfg.AllowDeploy,
+		Docker:             c.docker,
+		Detector:           c.detector,
+		ServerURL:          c.cfg.ServerURL,
+		RegistrationToken:  c.cfg.RegistrationToken,
+		NodeName:           c.cfg.Name,
+		ComposeDirs:        c.cfg.ComposeDirs,
+		MetricsInterval:    c.cfg.MetricsInterval,
+		SnapshotInterval:   c.cfg.SnapshotInterval,
+		UpdateCacheTTL:     c.cfg.UpdateCacheTTL,
+		InstallMode:        c.cfg.InstallMode,
+		ReleaseRepo:        c.cfg.ReleaseRepo,
+		AgentImage:         c.cfg.AgentImage,
+		AllowAgentUpdate:   c.cfg.AllowAgentUpdate,
+		AllowComposeUpdate: c.cfg.AllowComposeUpdate,
+		AllowDeploy:        c.cfg.AllowDeploy,
+		AllowRestart:       c.cfg.AllowRestart,
+		AllowImagePrune:    c.cfg.AllowImagePrune,
 	}
 	logLine := func(line string) {
 		msg, _ := protocol.NewMessage(protocol.TypeTaskLog, c.cfg.NodeID, protocol.TaskLogPayload{
@@ -243,19 +248,23 @@ func (c *Client) selfUpdateLoop(ctx context.Context, stop <-chan struct{}) {
 
 func (c *Client) runSelfUpdateCheck(ctx context.Context) {
 	executor := TaskExecutor{
-		Docker:            c.docker,
-		Detector:          c.detector,
-		ServerURL:         c.cfg.ServerURL,
-		RegistrationToken: c.cfg.RegistrationToken,
-		NodeName:          c.cfg.Name,
-		ComposeDirs:       c.cfg.ComposeDirs,
-		MetricsInterval:   c.cfg.MetricsInterval,
-		SnapshotInterval:  c.cfg.SnapshotInterval,
-		UpdateCacheTTL:    c.cfg.UpdateCacheTTL,
-		InstallMode:       c.cfg.InstallMode,
-		ReleaseRepo:       c.cfg.ReleaseRepo,
-		AgentImage:        c.cfg.AgentImage,
-		AllowDeploy:       c.cfg.AllowDeploy,
+		Docker:             c.docker,
+		Detector:           c.detector,
+		ServerURL:          c.cfg.ServerURL,
+		RegistrationToken:  c.cfg.RegistrationToken,
+		NodeName:           c.cfg.Name,
+		ComposeDirs:        c.cfg.ComposeDirs,
+		MetricsInterval:    c.cfg.MetricsInterval,
+		SnapshotInterval:   c.cfg.SnapshotInterval,
+		UpdateCacheTTL:     c.cfg.UpdateCacheTTL,
+		InstallMode:        c.cfg.InstallMode,
+		ReleaseRepo:        c.cfg.ReleaseRepo,
+		AgentImage:         c.cfg.AgentImage,
+		AllowAgentUpdate:   true,
+		AllowComposeUpdate: c.cfg.AllowComposeUpdate,
+		AllowDeploy:        c.cfg.AllowDeploy,
+		AllowRestart:       c.cfg.AllowRestart,
+		AllowImagePrune:    c.cfg.AllowImagePrune,
 	}
 	logLine := func(line string) {
 		log.Printf("self-update: %s", line)

@@ -36,6 +36,7 @@ export interface Node {
   status: string
   last_seen: string
   labels: string
+  capabilities: string
   created_at: string
   updated_at: string
 }
@@ -82,6 +83,8 @@ export interface ComposeProject {
   name: string
   path: string
   managed: boolean
+  ownership: string
+  imported: boolean
   content: string
   version: number
   update_available: boolean
@@ -142,6 +145,9 @@ export interface Policy {
   scope_id: string
   mode: PolicyMode
   schedule: string
+  maintenance_window: string
+  healthcheck_url: string
+  rollback_on_failure: boolean
   exclude_patterns: string
   enabled: boolean
   updated_at?: string

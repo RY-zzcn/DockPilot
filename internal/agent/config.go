@@ -25,7 +25,11 @@ type Config struct {
 	AgentImage         string
 	SelfUpdate         bool
 	SelfUpdateInterval time.Duration
+	AllowAgentUpdate   bool
+	AllowComposeUpdate bool
 	AllowDeploy        bool
+	AllowRestart       bool
+	AllowImagePrune    bool
 }
 
 type State struct {
@@ -52,7 +56,11 @@ func LoadConfig() Config {
 		AgentImage:         env("DOCKPILOT_AGENT_IMAGE", "ghcr.io/ry-zzcn/dockpilot-agent"),
 		SelfUpdate:         envBool("DOCKPILOT_AGENT_SELF_UPDATE", true),
 		SelfUpdateInterval: time.Duration(envInt("DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS", 3600)) * time.Second,
+		AllowAgentUpdate:   envBool("DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE", false),
+		AllowComposeUpdate: envBool("DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE", false),
 		AllowDeploy:        envBool("DOCKPILOT_AGENT_ALLOW_DEPLOY", false),
+		AllowRestart:       envBool("DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART", false),
+		AllowImagePrune:    envBool("DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE", false),
 	}
 	flag.StringVar(&cfg.ServerURL, "server", cfg.ServerURL, "DockPilot server URL")
 	flag.StringVar(&cfg.RegistrationToken, "registration-token", cfg.RegistrationToken, "one-time registration token")
@@ -64,7 +72,11 @@ func LoadConfig() Config {
 	flag.StringVar(&cfg.ReleaseRepo, "release-repo", cfg.ReleaseRepo, "GitHub repo for DockPilot releases")
 	flag.StringVar(&cfg.AgentImage, "agent-image", cfg.AgentImage, "Docker image used for agent self-update")
 	flag.BoolVar(&cfg.SelfUpdate, "self-update", cfg.SelfUpdate, "automatically update agent when a newer DockPilot release exists")
+	flag.BoolVar(&cfg.AllowAgentUpdate, "allow-agent-update", cfg.AllowAgentUpdate, "allow panel-triggered agent update tasks")
+	flag.BoolVar(&cfg.AllowComposeUpdate, "allow-compose-update", cfg.AllowComposeUpdate, "allow compose update tasks from the server")
 	flag.BoolVar(&cfg.AllowDeploy, "allow-deploy", cfg.AllowDeploy, "allow compose deploy tasks from the server")
+	flag.BoolVar(&cfg.AllowRestart, "allow-container-restart", cfg.AllowRestart, "allow container restart tasks from the server")
+	flag.BoolVar(&cfg.AllowImagePrune, "allow-image-prune", cfg.AllowImagePrune, "allow image prune tasks from the server")
 	composeDirs := strings.Join(cfg.ComposeDirs, ",")
 	flag.StringVar(&composeDirs, "compose-dirs", composeDirs, "comma-separated compose scan directories")
 	flag.Parse()
@@ -79,6 +91,23 @@ func LoadConfig() Config {
 		}
 	}
 	return cfg
+}
+
+func (c Config) Capabilities() map[string]bool {
+	return map[string]bool{
+		"detect_updates":    true,
+		"docker_snapshot":   true,
+		"metrics":           true,
+		"agent_update":      c.AllowAgentUpdate,
+		"compose_update":    c.AllowComposeUpdate,
+		"compose_deploy":    c.AllowDeploy,
+		"container_restart": c.AllowRestart,
+		"restart_container": c.AllowRestart,
+		"image_prune":       c.AllowImagePrune,
+		"prune_images":      c.AllowImagePrune,
+		"compose_read":      true,
+		"compose_write":     c.AllowDeploy,
+	}
 }
 
 func LoadState(path string) (State, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -80,7 +81,7 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 		}
 		for _, project := range state.ComposeProjects {
 			if s.detectionDue(node.ID, project.ID) {
-				task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "detect_updates", "scheduler", "")
+				task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "detect_updates", "scheduler", "", Policy{})
 				if err == nil {
 					s.lastRun[detectionKey(node.ID, project.ID)] = time.Now()
 					_ = s.hub.EnqueueTask(task)
@@ -94,11 +95,17 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 			if err != nil || !policy.Enabled || policy.Mode == PolicyManual || excluded(policy.ExcludePatterns, project.Name, project.Path) {
 				continue
 			}
+			if !withinMaintenanceWindow(policy.MaintenanceWindow, time.Now()) {
+				continue
+			}
+			if !nodeHasCapability(node.Capabilities, "compose_update") {
+				continue
+			}
 			key := "compose-update:" + policy.ID + ":" + node.ID + ":" + project.ID
 			if !due(policy, s.lastRun[key]) {
 				continue
 			}
-			task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "compose_update", "scheduler", policy.ID)
+			task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "compose_update", "scheduler", policy.ID, policy)
 			if err != nil {
 				continue
 			}
@@ -117,8 +124,16 @@ func detectionKey(nodeID, projectID string) string {
 	return "detect:" + nodeID + ":" + projectID
 }
 
-func (s *Scheduler) createComposeTask(node Node, projectID, projectName, projectPath, kind, requestedBy, policyID string) (Task, error) {
+func (s *Scheduler) createComposeTask(node Node, projectID, projectName, projectPath, kind, requestedBy, policyID string, policy Policy) (Task, error) {
 	args := map[string]string{"path": projectPath, "name": projectName}
+	if kind == "compose_update" {
+		if strings.TrimSpace(policy.HealthcheckURL) != "" {
+			args["healthcheck_url"] = strings.TrimSpace(policy.HealthcheckURL)
+		}
+		if policy.RollbackOnFailure {
+			args["rollback_on_failure"] = "true"
+		}
+	}
 	payload, _ := json.Marshal(args)
 	return s.store.CreateTask(Task{
 		NodeID:      node.ID,
@@ -220,6 +235,59 @@ func due(policy Policy, last time.Time) bool {
 		}
 	}
 	return time.Since(last) >= interval
+}
+
+func withinMaintenanceWindow(window string, now time.Time) bool {
+	window = strings.TrimSpace(window)
+	if window == "" {
+		return true
+	}
+	minuteOfDay := now.Hour()*60 + now.Minute()
+	for _, part := range strings.Split(window, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		bounds := strings.SplitN(part, "-", 2)
+		if len(bounds) != 2 {
+			continue
+		}
+		start, okStart := parseClockMinute(bounds[0])
+		end, okEnd := parseClockMinute(bounds[1])
+		if !okStart || !okEnd {
+			continue
+		}
+		if start == end {
+			return true
+		}
+		if start < end {
+			if minuteOfDay >= start && minuteOfDay < end {
+				return true
+			}
+			continue
+		}
+		if minuteOfDay >= start || minuteOfDay < end {
+			return true
+		}
+	}
+	return false
+}
+
+func parseClockMinute(value string) (int, bool) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 2 {
+		return 0, false
+	}
+	hour, errHour := parseSmallInt(parts[0])
+	minute, errMinute := parseSmallInt(parts[1])
+	if errHour != nil || errMinute != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, false
+	}
+	return hour*60 + minute, true
+}
+
+func parseSmallInt(value string) (int, error) {
+	return strconv.Atoi(strings.TrimSpace(value))
 }
 
 func excluded(patterns string, values ...string) bool {
