@@ -1,6 +1,6 @@
 services:
   server:
-    image: ghcr.io/ry-zzcn/dockpilot-server:${DOCKPILOT_IMAGE_TAG:-v0.2.20}
+    image: ghcr.io/ry-zzcn/dockpilot-server:${DOCKPILOT_IMAGE_TAG:-v0.2.21}
     container_name: dockpilot-server
     restart: unless-stopped
     ports:
@@ -20,7 +20,7 @@ services:
       - dockpilot-data:/data
 
   local-agent:
-    image: ghcr.io/ry-zzcn/dockpilot-agent:${DOCKPILOT_IMAGE_TAG:-v0.2.20}
+    image: ghcr.io/ry-zzcn/dockpilot-agent:${DOCKPILOT_IMAGE_TAG:-v0.2.21}
     container_name: dockpilot-agent
     restart: unless-stopped
     profiles:

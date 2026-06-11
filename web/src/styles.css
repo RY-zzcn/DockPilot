@@ -540,6 +540,10 @@ details.surface {
   min-height: 34px;
 }
 
+.surface-head > * {
+  min-width: 0;
+}
+
 .surface h2 {
   min-width: 0;
   overflow: hidden;
@@ -741,13 +745,13 @@ details.surface {
   display: grid;
   width: 100%;
   min-width: 0;
-  min-height: 118px;
-  grid-template-columns: minmax(220px, 0.78fr) minmax(170px, 0.42fr) minmax(260px, 0.8fr);
+  min-height: 104px;
+  grid-template-columns: minmax(300px, 1fr) minmax(132px, 0.28fr);
   align-items: center;
-  gap: 10px 14px;
+  gap: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
   background: var(--surface-soft);
   color: var(--text);
   text-align: left;
@@ -765,18 +769,53 @@ details.surface {
   margin-left: 2px;
 }
 
-.node-resource-main div,
-.node-resource-meta,
-.node-resource-details {
+.node-resource-copy,
+.node-resource-meta {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
+.node-resource-title-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 8px;
+}
+
+.node-resource-details {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.node-resource-details span {
+  min-width: 0;
+  max-width: 92px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-resource-meta {
+  justify-items: end;
+  text-align: right;
+}
+
 .node-resource-main strong,
 .node-resource-main small,
-.node-resource-meta span,
-.node-resource-details span {
+.node-resource-meta span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -789,8 +828,7 @@ details.surface {
 }
 
 .node-resource-main small,
-.node-resource-meta span,
-.node-resource-details span {
+.node-resource-meta span {
   color: var(--muted);
   font-size: 11px;
   font-weight: 850;
@@ -800,17 +838,17 @@ details.surface {
   display: grid;
   grid-column: 1 / -1;
   min-width: 0;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(132px, 1fr));
+  gap: 8px;
 }
 
 .resource-mini {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  padding: 10px;
+  padding: 8px 9px;
   background: var(--surface);
 }
 
@@ -841,7 +879,7 @@ details.surface {
 }
 
 .resource-mini .meter {
-  height: 7px;
+  height: 6px;
 }
 
 .resource-mini.muted {
@@ -1189,6 +1227,7 @@ details.surface {
 
 .table-row strong,
 .table-row span,
+.table-row em,
 .node-line-main strong,
 .node-line-main small,
 .node-line-meta span,
@@ -1208,6 +1247,7 @@ details.surface {
 .task-line strong,
 .task-line small {
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1270,19 +1310,30 @@ details.surface {
   background: var(--surface-soft);
 }
 
-.project-meta span,
-.task-meta span {
+.project-meta > span,
+.task-meta > span {
   display: grid;
   gap: 4px;
   min-width: 0;
   color: var(--muted);
   font-size: 12px;
+  overflow: hidden;
   overflow-wrap: anywhere;
 }
 
 .project-meta strong,
 .task-meta strong {
   color: var(--text);
+}
+
+.project-meta .meta-value,
+.task-meta .meta-value {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compose-editor {
@@ -1515,7 +1566,13 @@ details.surface {
 
 .dashboard-task-line strong,
 .dashboard-task-line small {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-line small {
@@ -2029,16 +2086,26 @@ small,
   }
 
   .node-resource-row {
-    grid-template-columns: minmax(0, 1fr) minmax(160px, 0.6fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .node-resource-metrics,
-  .node-resource-details {
+  .node-resource-meta {
+    grid-template-columns: repeat(2, minmax(0, auto));
+    justify-content: start;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .node-resource-metrics {
     grid-column: 1 / -1;
   }
 
+  .node-resource-title-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .node-resource-details {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    justify-content: flex-start;
   }
 
   .node-rail,
@@ -2146,10 +2213,13 @@ small,
   .resource-stat-grid,
   .telemetry-list,
   .node-resource-row,
-  .node-resource-details,
   .summary-facts,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .node-resource-details {
+    display: none;
   }
 
   .resource-list,

@@ -176,8 +176,15 @@
               >
                 <div class="node-resource-main">
                   <span class="status-dot" :class="row.node.status"></span>
-                  <div>
-                    <strong :title="row.node.name">{{ row.node.name }}</strong>
+                  <div class="node-resource-copy">
+                    <div class="node-resource-title-row">
+                      <strong :title="row.node.name">{{ row.node.name }}</strong>
+                      <div class="node-resource-details" aria-label="节点环境信息">
+                        <span :title="row.node.docker_version || '-'">Docker {{ shortLabel(row.node.docker_version) }}</span>
+                        <span :title="row.node.compose_version || '-'">Compose {{ shortLabel(row.node.compose_version) }}</span>
+                        <span :title="row.metric?.recorded_at || '等待节点资源上报'">资源 {{ row.metric ? shortTime(row.metric.recorded_at) : '等待' }}</span>
+                      </div>
+                    </div>
                     <small :title="`${agentInstallModeLabel(row.node)} · ${row.node.os || '-'}/${row.node.arch || '-'}`">
                       {{ agentInstallModeLabel(row.node) }} · {{ row.node.os || '-' }}/{{ row.node.arch || '-' }}
                     </small>
@@ -212,11 +219,6 @@
                     </div>
                     <div class="meter"><span :style="{ width: row.metric ? clampPercent(metricDiskPercent(row.metric)) + '%' : '0%' }"></span></div>
                   </div>
-                </div>
-                <div class="node-resource-details">
-                  <span :title="row.node.docker_version || '-'">Docker {{ shortLabel(row.node.docker_version) }}</span>
-                  <span :title="row.node.compose_version || '-'">Compose {{ shortLabel(row.node.compose_version) }}</span>
-                  <span :title="row.metric?.recorded_at || '等待节点资源上报'">资源 {{ row.metric ? shortTime(row.metric.recorded_at) : '等待上报' }}</span>
                 </div>
               </button>
               <p v-if="dashboardNodeRows.length === 0" class="empty-hint compact-empty">暂无节点。</p>
@@ -258,8 +260,8 @@
             <div class="compact-list">
               <button v-for="task in dashboardTaskItems" :key="task.id" class="task-line dashboard-task-line" @click="openTask(task)">
                 <span class="badge" :class="task.status">{{ statusText(task.status) }}</span>
-                <strong>{{ taskTitle(task.kind) }}</strong>
-                <small>{{ taskNodeName(task.node_id) }}</small>
+                <strong :title="taskTitle(task.kind)">{{ taskTitle(task.kind) }}</strong>
+                <small :title="taskNodeName(task.node_id)">{{ taskNodeName(task.node_id) }}</small>
               </button>
               <p v-if="dashboardTaskItems.length === 0" class="empty-hint compact-empty">暂无任务。</p>
             </div>
@@ -340,7 +342,7 @@
                 </label>
                 <label>
                   <span>Agent 版本</span>
-                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.20" />
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.21" />
                 </label>
                 <div class="install-mode">
                   <span>安装方式</span>
@@ -859,10 +861,10 @@
           </div>
           <template v-if="selectedTask">
             <div class="task-meta">
-              <span><strong>ID</strong>{{ selectedTask.id }}</span>
-              <span><strong>节点</strong>{{ taskNodeName(selectedTask.node_id) }}</span>
+              <span :title="selectedTask.id"><strong>ID</strong><span class="meta-value">{{ selectedTask.id }}</span></span>
+              <span :title="taskNodeName(selectedTask.node_id)"><strong>节点</strong><span class="meta-value">{{ taskNodeName(selectedTask.node_id) }}</span></span>
               <span><strong>状态</strong><em class="badge" :class="selectedTask.status">{{ statusText(selectedTask.status) }}</em></span>
-              <span><strong>结果</strong>{{ taskMessage(selectedTask) || '-' }}</span>
+              <span :title="taskMessage(selectedTask) || '-'"><strong>结果</strong><span class="meta-value">{{ taskMessage(selectedTask) || '-' }}</span></span>
             </div>
             <pre v-if="!taskLogsCollapsed" class="logs">{{ selectedTaskLogs }}</pre>
             <p v-else class="empty-hint">日志已折叠。</p>
