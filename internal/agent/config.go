@@ -48,7 +48,7 @@ func LoadConfig() Config {
 		Name:               env("DOCKPILOT_NODE_NAME", hostname),
 		StatePath:          env("DOCKPILOT_STATE_PATH", filepath.Join(home, ".dockpilot-agent.json")),
 		ComposeDirs:        splitCSV(env("DOCKPILOT_COMPOSE_DIRS", "/opt,/srv,/var/www")),
-		MetricsInterval:    time.Duration(envInt("DOCKPILOT_METRICS_INTERVAL_SECONDS", 15)) * time.Second,
+		MetricsInterval:    time.Duration(envInt("DOCKPILOT_METRICS_INTERVAL_SECONDS", 5)) * time.Second,
 		SnapshotInterval:   time.Duration(envInt("DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS", 60)) * time.Second,
 		UpdateCacheTTL:     time.Duration(envInt("DOCKPILOT_UPDATE_CACHE_SECONDS", 900)) * time.Second,
 		InstallMode:        env("DOCKPILOT_INSTALL_MODE", ""),

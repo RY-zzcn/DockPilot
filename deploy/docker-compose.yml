@@ -1,6 +1,6 @@
 services:
   server:
-    image: ghcr.io/ry-zzcn/dockpilot-server:${DOCKPILOT_IMAGE_TAG:-v0.2.19}
+    image: ghcr.io/ry-zzcn/dockpilot-server:${DOCKPILOT_IMAGE_TAG:-v0.2.20}
     container_name: dockpilot-server
     restart: unless-stopped
     ports:
@@ -20,7 +20,7 @@ services:
       - dockpilot-data:/data
 
   local-agent:
-    image: ghcr.io/ry-zzcn/dockpilot-agent:${DOCKPILOT_IMAGE_TAG:-v0.2.19}
+    image: ghcr.io/ry-zzcn/dockpilot-agent:${DOCKPILOT_IMAGE_TAG:-v0.2.20}
     container_name: dockpilot-agent
     restart: unless-stopped
     profiles:
@@ -31,6 +31,7 @@ services:
       DOCKPILOT_REGISTRATION_TOKEN: ${DOCKPILOT_AGENT_REGISTRATION_TOKEN:?set DOCKPILOT_AGENT_REGISTRATION_TOKEN in .env}
       DOCKPILOT_NODE_NAME: ${HOSTNAME:-local-vps}
       DOCKPILOT_COMPOSE_DIRS: /opt,/srv,/var/www
+      DOCKPILOT_METRICS_INTERVAL_SECONDS: ${DOCKPILOT_METRICS_INTERVAL_SECONDS:-5}
       DOCKPILOT_UPDATE_CACHE_SECONDS: ${DOCKPILOT_UPDATE_CACHE_SECONDS:-900}
       DOCKPILOT_INSTALL_MODE: docker
       DOCKPILOT_RELEASE_REPO: ${DOCKPILOT_RELEASE_REPO:-RY-zzcn/DockPilot}

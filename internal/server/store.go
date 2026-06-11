@@ -195,12 +195,13 @@ type Event struct {
 }
 
 type Overview struct {
-	NodesTotal       int64  `json:"nodes_total"`
-	NodesOnline      int64  `json:"nodes_online"`
-	ContainersTotal  int64  `json:"containers_total"`
-	UpdatesAvailable int64  `json:"updates_available"`
-	FailedTasks      int64  `json:"failed_tasks"`
-	LastMetric       Metric `json:"last_metric"`
+	NodesTotal       int64    `json:"nodes_total"`
+	NodesOnline      int64    `json:"nodes_online"`
+	ContainersTotal  int64    `json:"containers_total"`
+	UpdatesAvailable int64    `json:"updates_available"`
+	FailedTasks      int64    `json:"failed_tasks"`
+	LastMetric       Metric   `json:"last_metric"`
+	NodeMetrics      []Metric `json:"node_metrics"`
 }
 
 type DockerState struct {
@@ -1384,6 +1385,23 @@ SELECT id FROM update_records ORDER BY id DESC LIMIT -1 OFFSET ?
 	return err
 }
 
+func (s *Store) PruneMetricsHistory() error {
+	const (
+		retentionHours    = 24
+		maxMetricsPerNode = 720
+	)
+	if _, err := s.db.Exec(`DELETE FROM node_metrics WHERE recorded_at < datetime('now','localtime','-` + fmt.Sprint(retentionHours) + ` hours')`); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM node_metrics WHERE id IN (
+SELECT id FROM (
+  SELECT id, row_number() OVER (PARTITION BY node_id ORDER BY recorded_at DESC, id DESC) AS row_num
+  FROM node_metrics
+) WHERE row_num > ?
+)`, maxMetricsPerNode)
+	return err
+}
+
 func (s *Store) ListPolicies() ([]Policy, error) {
 	rows, err := s.db.Query(`SELECT id, scope, scope_id, mode, schedule, maintenance_window, healthcheck_url, rollback_on_failure, exclude_patterns, enabled, updated_at FROM policies ORDER BY scope, scope_id`)
 	if err != nil {
@@ -1580,8 +1598,24 @@ func (s *Store) Overview() (Overview, error) {
 			return overview, err
 		}
 	}
-	_ = s.db.QueryRow(`SELECT id, node_id, cpu_percent, memory_used, memory_total, disk_used, disk_total, network_rx, network_tx, container_count, recorded_at FROM node_metrics ORDER BY recorded_at DESC LIMIT 1`).
-		Scan(&overview.LastMetric.ID, &overview.LastMetric.NodeID, &overview.LastMetric.CPUPercent, &overview.LastMetric.MemoryUsed, &overview.LastMetric.MemoryTotal, &overview.LastMetric.DiskUsed, &overview.LastMetric.DiskTotal, &overview.LastMetric.NetworkRx, &overview.LastMetric.NetworkTx, &overview.LastMetric.ContainerCount, &overview.LastMetric.RecordedAt)
+	metrics, err := queryRows(s.db, `
+SELECT id, node_id, cpu_percent, memory_used, memory_total, disk_used, disk_total, network_rx, network_tx, container_count, recorded_at
+FROM node_metrics AS metric
+WHERE metric.id = (
+  SELECT latest.id
+  FROM node_metrics AS latest
+  WHERE latest.node_id = metric.node_id
+  ORDER BY latest.recorded_at DESC, latest.id DESC
+  LIMIT 1
+)
+ORDER BY recorded_at DESC, id DESC`, scanMetric)
+	if err != nil {
+		return overview, err
+	}
+	overview.NodeMetrics = metrics
+	if len(metrics) > 0 {
+		overview.LastMetric = metrics[0]
+	}
 	return overview, nil
 }
 
@@ -1600,6 +1634,12 @@ func queryRows[T any](db *sql.DB, query string, scan func(*sql.Rows) (T, error),
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func scanMetric(rows *sql.Rows) (Metric, error) {
+	var metric Metric
+	err := rows.Scan(&metric.ID, &metric.NodeID, &metric.CPUPercent, &metric.MemoryUsed, &metric.MemoryTotal, &metric.DiskUsed, &metric.DiskTotal, &metric.NetworkRx, &metric.NetworkTx, &metric.ContainerCount, &metric.RecordedAt)
+	return metric, err
 }
 
 func scanContainer(rows *sql.Rows) (Container, error) {

@@ -70,6 +70,73 @@ func TestDefaultPolicyDisablesAutomaticUpdateOnly(t *testing.T) {
 	}
 }
 
+func TestOverviewReturnsLatestMetricForEachNode(t *testing.T) {
+	store := testStore(t)
+	nodeA := testHello("node-a")
+	nodeA.NodeToken = "token-a"
+	nodeA.Name = "node-a"
+	nodeB := testHello("node-b")
+	nodeB.NodeToken = "token-b"
+	nodeB.Name = "node-b"
+	if _, _, err := store.UpsertNodeFromHello(nodeA, "node-a"); err != nil {
+		t.Fatalf("upsert node a: %v", err)
+	}
+	if _, _, err := store.UpsertNodeFromHello(nodeB, "node-b"); err != nil {
+		t.Fatalf("upsert node b: %v", err)
+	}
+	_, err := store.db.Exec(`
+INSERT INTO node_metrics(node_id, cpu_percent, memory_used, memory_total, disk_used, disk_total, network_rx, network_tx, container_count, recorded_at)
+VALUES
+  ('node-a', 12.5, 100, 200, 300, 600, 1, 2, 3, '2026-06-11 10:00:00'),
+  ('node-a', 45.5, 120, 200, 320, 600, 3, 4, 4, '2026-06-11 10:05:00'),
+  ('node-b', 67.5, 500, 1000, 700, 1000, 5, 6, 7, '2026-06-11 10:10:00')`)
+	if err != nil {
+		t.Fatalf("insert metrics: %v", err)
+	}
+
+	overview, err := store.Overview()
+	if err != nil {
+		t.Fatalf("overview: %v", err)
+	}
+	if len(overview.NodeMetrics) != 2 {
+		t.Fatalf("node metrics length = %d, want 2: %#v", len(overview.NodeMetrics), overview.NodeMetrics)
+	}
+	if overview.LastMetric.NodeID != "node-b" || overview.LastMetric.CPUPercent != 67.5 {
+		t.Fatalf("last metric was not the newest global metric: %#v", overview.LastMetric)
+	}
+	latestByNode := map[string]Metric{}
+	for _, metric := range overview.NodeMetrics {
+		latestByNode[metric.NodeID] = metric
+	}
+	if latestByNode["node-a"].CPUPercent != 45.5 || latestByNode["node-b"].CPUPercent != 67.5 {
+		t.Fatalf("unexpected latest metrics by node: %#v", latestByNode)
+	}
+}
+
+func TestPruneMetricsHistoryLimitsRowsPerNode(t *testing.T) {
+	store := testStore(t)
+	node := testHello("node-a")
+	node.NodeToken = "token-a"
+	if _, _, err := store.UpsertNodeFromHello(node, "node-a"); err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	for i := 0; i < 725; i++ {
+		if err := store.InsertMetrics("node-a", protocol.MetricsPayload{CPUPercent: float64(i)}); err != nil {
+			t.Fatalf("insert metric %d: %v", i, err)
+		}
+	}
+	if err := store.PruneMetricsHistory(); err != nil {
+		t.Fatalf("prune metrics: %v", err)
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM node_metrics WHERE node_id = 'node-a'`).Scan(&count); err != nil {
+		t.Fatalf("count metrics: %v", err)
+	}
+	if count != 720 {
+		t.Fatalf("metrics count = %d, want 720", count)
+	}
+}
+
 func TestPolicyReliabilityFieldsPersist(t *testing.T) {
 	store := testStore(t)
 	saved, err := store.UpsertPolicy(Policy{

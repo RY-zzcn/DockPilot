@@ -69,6 +69,9 @@ func (s *Scheduler) tick() {
 	if err := s.store.PruneTaskHistory(); err != nil {
 		log.Printf("prune task history failed: %v", err)
 	}
+	if err := s.store.PruneMetricsHistory(); err != nil {
+		log.Printf("prune metrics history failed: %v", err)
+	}
 }
 
 func (s *Scheduler) enqueuePolicyTasks() error {

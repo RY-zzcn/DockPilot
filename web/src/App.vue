@@ -150,100 +150,104 @@
           </article>
         </div>
 
-        <section class="attention-strip" :class="{ quiet: attentionItems.length === 0 }">
-          <div class="attention-summary">
-            <AlertTriangle :size="18" />
-            <div>
-              <h2>异常与更新</h2>
-              <p>{{ attentionItems.length > 0 ? `需要处理 ${attentionItems.length} 项` : '当前状态正常' }}</p>
-            </div>
-          </div>
-          <div class="attention-actions">
-            <button v-for="item in attentionItems" :key="item.key" class="attention-pill" @click="item.action">
-              <span class="badge pending">{{ item.kind }}</span>
-              <strong>{{ item.title }}</strong>
-              <small>{{ item.detail }}</small>
-            </button>
-            <p v-if="attentionItems.length === 0" class="empty-hint compact-empty">当前没有需要处理的项目。</p>
-          </div>
-        </section>
-
-        <div class="dashboard-grid">
-          <section class="surface span-2">
+        <div class="dashboard-grid dashboard-layout">
+          <section class="surface node-resource-panel span-2">
             <div class="surface-head">
-              <h2>节点运行态</h2>
-              <button class="secondary" :disabled="!isAdmin || onlineNodes.length === 0 || isPending('detect-all')" @click="detectAllNodes">
-                <Search :size="18" />
-                全部检测
-              </button>
+              <div>
+                <h2>节点与资源</h2>
+                <p class="muted-line">资源每 {{ formatDuration(METRICS_PROBE_INTERVAL_SECONDS) }} 上报，显示 CPU、内存、硬盘。</p>
+              </div>
+              <div class="button-row compact-actions">
+                <span class="count-chip">{{ dashboardNodeRows.length }} 个节点</span>
+                <button class="secondary" :disabled="!isAdmin || onlineNodes.length === 0 || isPending('detect-all')" @click="detectAllNodes">
+                  <Search :size="18" />
+                  全部检测
+                </button>
+              </div>
             </div>
-            <div class="node-table">
+            <div class="node-resource-list">
               <button
-                v-for="node in nodes"
-                :key="node.id"
-                class="node-line"
-                :class="{ selected: node.id === selectedNodeId }"
-                @click="selectNode(node.id, 'nodes')"
+                v-for="row in dashboardNodeRows"
+                :key="row.node.id"
+                class="node-resource-row"
+                :class="{ selected: row.node.id === selectedNodeId }"
+                :title="nodeResourceTitle(row)"
+                @click="selectNode(row.node.id, 'nodes')"
               >
-                <span class="status-dot" :class="node.status"></span>
-                <div class="node-line-main">
-                  <strong>{{ node.name }}</strong>
-                  <small>{{ node.os || '-' }}/{{ node.arch || '-' }}</small>
+                <div class="node-resource-main">
+                  <span class="status-dot" :class="row.node.status"></span>
+                  <div>
+                    <strong :title="row.node.name">{{ row.node.name }}</strong>
+                    <small :title="`${agentInstallModeLabel(row.node)} · ${row.node.os || '-'}/${row.node.arch || '-'}`">
+                      {{ agentInstallModeLabel(row.node) }} · {{ row.node.os || '-' }}/{{ row.node.arch || '-' }}
+                    </small>
+                  </div>
                 </div>
-                <div class="node-line-meta">
-                  <span>{{ node.docker_version || 'Docker -' }}</span>
-                  <em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em>
+                <div class="node-resource-meta">
+                  <em :class="agentVersionBadgeClass(row.node)">{{ agentVersionLabel(row.node) }}</em>
+                  <span :title="row.node.last_seen || '-'">心跳 {{ shortTime(row.node.last_seen) }}</span>
+                </div>
+                <div class="node-resource-metrics">
+                  <div class="resource-mini" :class="{ muted: !row.metric }" :title="row.metric ? metricDetailTitle(row.metric, 'cpu') : '等待节点上报 CPU 数据'">
+                    <div>
+                      <Cpu :size="15" />
+                      <span>CPU</span>
+                      <strong>{{ row.metric ? formatPercent(row.metric.cpu_percent) : '等待' }}</strong>
+                    </div>
+                    <div class="meter"><span :style="{ width: row.metric ? clampPercent(row.metric.cpu_percent) + '%' : '0%' }"></span></div>
+                  </div>
+                  <div class="resource-mini" :class="{ muted: !row.metric }" :title="row.metric ? metricDetailTitle(row.metric, 'memory') : '等待节点上报内存数据'">
+                    <div>
+                      <MemoryStick :size="15" />
+                      <span>内存</span>
+                      <strong>{{ row.metric ? formatPercent(metricMemoryPercent(row.metric)) : '等待' }}</strong>
+                    </div>
+                    <div class="meter"><span :style="{ width: row.metric ? clampPercent(metricMemoryPercent(row.metric)) + '%' : '0%' }"></span></div>
+                  </div>
+                  <div class="resource-mini" :class="{ muted: !row.metric }" :title="row.metric ? metricDetailTitle(row.metric, 'disk') : '等待节点上报硬盘数据'">
+                    <div>
+                      <HardDrive :size="15" />
+                      <span>磁盘</span>
+                      <strong>{{ row.metric ? formatPercent(metricDiskPercent(row.metric)) : '等待' }}</strong>
+                    </div>
+                    <div class="meter"><span :style="{ width: row.metric ? clampPercent(metricDiskPercent(row.metric)) + '%' : '0%' }"></span></div>
+                  </div>
+                </div>
+                <div class="node-resource-details">
+                  <span :title="row.node.docker_version || '-'">Docker {{ shortLabel(row.node.docker_version) }}</span>
+                  <span :title="row.node.compose_version || '-'">Compose {{ shortLabel(row.node.compose_version) }}</span>
+                  <span :title="row.metric?.recorded_at || '等待节点资源上报'">资源 {{ row.metric ? shortTime(row.metric.recorded_at) : '等待上报' }}</span>
                 </div>
               </button>
+              <p v-if="dashboardNodeRows.length === 0" class="empty-hint compact-empty">暂无节点。</p>
             </div>
           </section>
 
-          <section class="surface">
+          <section class="surface attention-panel" :class="{ quiet: attentionItems.length === 0 }">
             <div class="surface-head">
-              <h2>资源快照</h2>
-              <span class="count-chip">{{ overview.last_metric.node_id ? taskNodeName(overview.last_metric.node_id) : '暂无数据' }}</span>
+              <div class="attention-summary">
+                <AlertTriangle :size="18" />
+                <div>
+                  <h2>异常与更新</h2>
+                  <p>{{ attentionItems.length > 0 ? `需要处理 ${attentionItems.length} 项` : '当前状态正常' }}</p>
+                </div>
+              </div>
+              <button class="ghost small-action" @click="activeView = 'updates'">
+                <RefreshCw :size="16" />
+                查看
+              </button>
             </div>
-            <div class="telemetry-list">
-              <div class="telemetry-line">
-                <Cpu :size="18" />
-                <div class="telemetry-text">
-                  <span>CPU</span>
-                  <small>{{ overview.last_metric.container_count }} 个容器</small>
-                </div>
-                <strong>{{ formatPercent(overview.last_metric.cpu_percent) }}</strong>
-                <div class="meter"><span :style="{ width: clampPercent(overview.last_metric.cpu_percent) + '%' }"></span></div>
-              </div>
-              <div class="telemetry-line">
-                <MemoryStick :size="18" />
-                <div class="telemetry-text">
-                  <span>内存</span>
-                  <small>{{ formatBytes(overview.last_metric.memory_used) }} / {{ formatBytes(overview.last_metric.memory_total) }}</small>
-                </div>
-                <strong>{{ formatPercent(memoryPercent) }}</strong>
-                <div class="meter"><span :style="{ width: clampPercent(memoryPercent) + '%' }"></span></div>
-              </div>
-              <div class="telemetry-line">
-                <HardDrive :size="18" />
-                <div class="telemetry-text">
-                  <span>磁盘</span>
-                  <small>{{ formatBytes(overview.last_metric.disk_used) }} / {{ formatBytes(overview.last_metric.disk_total) }}</small>
-                </div>
-                <strong>{{ formatPercent(diskPercent) }}</strong>
-                <div class="meter"><span :style="{ width: clampPercent(diskPercent) + '%' }"></span></div>
-              </div>
-              <div class="telemetry-line">
-                <Network :size="18" />
-                <div class="telemetry-text">
-                  <span>网络</span>
-                  <small>收 {{ formatBytes(overview.last_metric.network_rx) }} / 发 {{ formatBytes(overview.last_metric.network_tx) }}</small>
-                </div>
-                <strong>{{ formatBytes(overview.last_metric.network_rx + overview.last_metric.network_tx) }}</strong>
-                <div class="meter accent"><span :style="{ width: '64%' }"></span></div>
-              </div>
+            <div class="attention-actions compact-attention-actions">
+              <button v-for="item in attentionItems" :key="item.key" class="attention-pill" :title="`${item.title}\n${item.detail}`" @click="item.action">
+                <span class="badge pending">{{ item.kind }}</span>
+                <strong>{{ item.title }}</strong>
+                <small>{{ item.detail }}</small>
+              </button>
+              <p v-if="attentionItems.length === 0" class="empty-hint compact-empty">当前没有需要处理的项目。</p>
             </div>
           </section>
 
-          <section class="surface">
+          <section class="surface dashboard-task-panel">
             <div class="surface-head">
               <h2>任务队列</h2>
               <button class="ghost small-action" @click="activeView = 'tasks'">
@@ -279,6 +283,7 @@
               :key="node.id"
               class="node-card"
               :class="{ selected: node.id === selectedNodeId }"
+              :title="nodeTitle(node)"
               @click="selectNode(node.id)"
             >
               <span class="status-dot" :class="node.status"></span>
@@ -296,11 +301,11 @@
               <h2>{{ selectedNode?.name || '选择节点' }}</h2>
             </div>
             <div class="summary-facts">
-              <span>Docker <strong>{{ selectedNode?.docker_version || '-' }}</strong></span>
-              <span>Compose <strong>{{ selectedNode?.compose_version || '-' }}</strong></span>
-              <span>Agent <strong>{{ selectedNode?.version ? `v${selectedNode.version}` : '-' }}</strong></span>
-              <span>安装 <strong>{{ agentInstallModeLabel(selectedNode) }}</strong></span>
-              <span>心跳 <strong>{{ selectedNode?.last_seen || '-' }}</strong></span>
+              <span title="Docker 版本">Docker <strong :title="selectedNode?.docker_version || '-'">{{ selectedNode?.docker_version || '-' }}</strong></span>
+              <span title="Docker Compose 版本">Compose <strong :title="selectedNode?.compose_version || '-'">{{ selectedNode?.compose_version || '-' }}</strong></span>
+              <span title="Agent 版本">Agent <strong :title="selectedNode?.version ? `v${selectedNode.version}` : '-'">{{ selectedNode?.version ? `v${selectedNode.version}` : '-' }}</strong></span>
+              <span title="Agent 安装方式">安装 <strong>{{ agentInstallModeLabel(selectedNode) }}</strong></span>
+              <span title="最近心跳">心跳 <strong :title="selectedNode?.last_seen || '-'">{{ selectedNode?.last_seen || '-' }}</strong></span>
             </div>
             <div class="button-row">
               <button class="secondary" :disabled="!selectedNodeId || !isAdmin || !canRunTask(selectedNode, 'detect_updates')" @click="createNodeTask('detect_updates')">
@@ -335,7 +340,7 @@
                 </label>
                 <label>
                   <span>Agent 版本</span>
-                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.19" />
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.20" />
                 </label>
                 <div class="install-mode">
                   <span>安装方式</span>
@@ -415,10 +420,10 @@
                 <span></span>
               </div>
               <div v-for="container in filteredContainers" :key="container.id" class="table-row">
-                <strong>{{ container.name }}</strong>
-                <span>{{ container.image }}</span>
-                <span><em class="badge" :class="container.state">{{ container.state }}</em></span>
-                <span>{{ container.compose_project || '-' }}</span>
+                <strong :title="container.name">{{ container.name }}</strong>
+                <span :title="container.image">{{ container.image }}</span>
+                <span :title="container.status || container.state"><em class="badge" :class="container.state">{{ container.state }}</em></span>
+                <span :title="container.compose_project || '-'">{{ container.compose_project || '-' }}</span>
                 <span class="row-actions">
                   <button
                     class="icon-button"
@@ -446,10 +451,10 @@
                 <span>创建时间</span>
               </div>
               <div v-for="image in dockerState.images" :key="image.id + image.repository + image.tag" class="table-row">
-                <strong>{{ image.repository }}</strong>
-                <span>{{ image.tag }}</span>
-                <span>{{ image.size }}</span>
-                <span>{{ image.created_at }}</span>
+                <strong :title="image.repository">{{ image.repository }}</strong>
+                <span :title="image.tag">{{ image.tag }}</span>
+                <span :title="image.size">{{ image.size }}</span>
+                <span :title="image.created_at">{{ image.created_at }}</span>
               </div>
             </div>
           </section>
@@ -463,9 +468,9 @@
               </button>
             </div>
             <div class="project-strip">
-              <button v-for="project in dockerState.compose_projects" :key="project.id" class="project-pill" @click="openProject(project)">
-                <strong>{{ project.name }}</strong>
-                <span>{{ project.path }}</span>
+              <button v-for="project in dockerState.compose_projects" :key="project.id" class="project-pill" :title="composeProjectTitle(project)" @click="openProject(project)">
+                <strong :title="project.name">{{ project.name }}</strong>
+                <span :title="project.path">{{ project.path }}</span>
                 <em :class="detectionBadgeClass(project)" :title="detectionTitle(project)">{{ detectionLabel(project) }}</em>
               </button>
             </div>
@@ -537,13 +542,14 @@
                 :key="project.id"
                 class="project-row"
                 :class="{ selected: project.id === selectedProjectId }"
+                :title="composeProjectTitle(project)"
                 @click="selectCompose(project)"
               >
-                <strong>{{ project.name }}</strong>
-                <span>{{ project.path }}</span>
+                <strong :title="project.name">{{ project.name }}</strong>
+                <span :title="project.path">{{ project.path }}</span>
                 <small>{{ composeOwnershipLabel(project) }}</small>
                 <em :class="detectionBadgeClass(project)" :title="detectionTitle(project)">{{ detectionLabel(project) }}</em>
-                <small v-if="detectionMeta(project)">{{ detectionMeta(project) }}</small>
+                <small v-if="detectionMeta(project)" :title="detectionMeta(project)">{{ detectionMeta(project) }}</small>
               </button>
             </div>
           </section>
@@ -688,11 +694,11 @@
           <div class="update-list">
             <article v-for="row in composePolicyRows" :key="row.project.id" class="update-row">
               <div class="update-main">
-                <strong>{{ row.project.name }}</strong>
-                <span>{{ row.project.path }}</span>
+                <strong :title="row.project.name">{{ row.project.name }}</strong>
+                <span :title="row.project.path">{{ row.project.path }}</span>
                 <em :class="detectionBadgeClass(row.project)" :title="detectionTitle(row.project)">{{ detectionLabel(row.project) }}</em>
-                <small v-if="detectionMeta(row.project)">{{ detectionMeta(row.project) }}</small>
-                <small v-if="detectionReason(row.project)" class="error-text">{{ detectionReason(row.project) }}</small>
+                <small v-if="detectionMeta(row.project)" :title="detectionMeta(row.project)">{{ detectionMeta(row.project) }}</small>
+                <small v-if="detectionReason(row.project)" class="error-text" :title="detectionReason(row.project)">{{ detectionReason(row.project) }}</small>
               </div>
               <div class="segmented">
                 <button :class="{ active: row.policy.mode === 'manual' }" @click="row.policy.mode = 'manual'">不自动</button>
@@ -738,10 +744,10 @@
               <span>状态</span>
             </div>
             <div v-for="record in updateRecords" :key="record.id" class="table-row">
-              <span>{{ record.created_at }}</span>
-              <strong>{{ record.name || '-' }}</strong>
-              <span>{{ taskNodeName(record.node_id) }}</span>
-              <span>{{ shortVersion(record.previous_version) }} -> {{ shortVersion(record.current_version) }}</span>
+              <span :title="record.created_at">{{ record.created_at }}</span>
+              <strong :title="record.name || '-'">{{ record.name || '-' }}</strong>
+              <span :title="taskNodeName(record.node_id)">{{ taskNodeName(record.node_id) }}</span>
+              <span :title="`${record.previous_version || '-'} -> ${record.current_version || '-'}`">{{ shortVersion(record.previous_version) }} -> {{ shortVersion(record.current_version) }}</span>
               <span><em class="badge" :class="record.changed ? 'success' : 'pending'">{{ record.changed ? '已更新' : '未变化' }}</em></span>
             </div>
           </div>
@@ -764,9 +770,9 @@
               <span></span>
             </div>
             <div v-for="node in nodes" :key="node.id" class="table-row">
-              <strong>{{ node.name }}</strong>
-              <span>{{ node.version ? `v${node.version}` : '-' }}</span>
-              <span>{{ node.os }}/{{ node.arch }}</span>
+              <strong :title="node.name">{{ node.name }}</strong>
+              <span :title="node.version ? `v${node.version}` : '-'">{{ node.version ? `v${node.version}` : '-' }}</span>
+              <span :title="`${node.os}/${node.arch}`">{{ node.os }}/{{ node.arch }}</span>
               <span><em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em></span>
               <span class="row-actions">
                 <button class="icon-button" title="升级 Agent" :disabled="!isAdmin || !agentCanUpdate(node)" @click="upgradeAgent(node)">
@@ -814,6 +820,7 @@
               :key="task.id"
               class="task-row"
               :class="{ selected: selectedTask?.id === task.id }"
+              :title="taskTitleText(task)"
               @click="openTask(task)"
             >
               <span class="badge" :class="task.status">{{ statusText(task.status) }}</span>
@@ -822,11 +829,11 @@
                   <strong>{{ taskTitle(task.kind) }}</strong>
                   <small>{{ task.created_at }}</small>
                 </div>
-                <p class="task-message">{{ taskMessage(task) || task.target_id || '-' }}</p>
+                <p class="task-message" :title="taskMessage(task) || task.target_id || '-'">{{ taskMessage(task) || task.target_id || '-' }}</p>
                 <div class="task-meta-row">
-                  <span>{{ taskNodeName(task.node_id) }}</span>
-                  <span>{{ task.target_type || '任务' }}</span>
-                  <span>{{ shortTaskId(task.id) }}</span>
+                  <span :title="taskNodeName(task.node_id)">{{ taskNodeName(task.node_id) }}</span>
+                  <span :title="task.target_type || '任务'">{{ task.target_type || '任务' }}</span>
+                  <span :title="task.id">{{ shortTaskId(task.id) }}</span>
                 </div>
               </div>
             </button>
@@ -1043,7 +1050,6 @@ import {
   LogIn,
   LogOut,
   MemoryStick,
-  Network,
   Package,
   Palette,
   Play,
@@ -1066,6 +1072,7 @@ import type {
   ComposeProject,
   DockerState,
   InstallInfo,
+  Metric,
   Node,
   Notification,
   Overview,
@@ -1100,8 +1107,15 @@ interface Toast {
   message: string
 }
 
+interface DashboardNodeRow {
+  node: Node
+  metric?: Metric
+}
+
 const THEME_KEY = 'dockpilot.theme'
 const REFRESH_INTERVAL_MS = 30000
+const METRICS_PROBE_INTERVAL_SECONDS = 5
+const OVERVIEW_REFRESH_INTERVAL_MS = METRICS_PROBE_INTERVAL_SECONDS * 1000
 const themes: { value: ThemeName; label: string }[] = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '蓝白' },
@@ -1157,7 +1171,9 @@ const pendingActions = ref<string[]>([])
 const currentClock = ref('')
 let clockTimer: number | undefined
 let refreshTimer: number | undefined
+let overviewTimer: number | undefined
 let refreshPromise: Promise<void> | null = null
+let overviewPromise: Promise<void | undefined> | null = null
 let dockerLoadSerial = 0
 let toastID = 0
 const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -1181,7 +1197,8 @@ const overview = reactive<Overview>({
     network_tx: 0,
     container_count: 0,
     recorded_at: ''
-  }
+  },
+  node_metrics: []
 })
 const nodes = ref<Node[]>([])
 const dockerState = reactive<DockerState>({ containers: [], images: [], compose_projects: [] })
@@ -1259,6 +1276,7 @@ const notificationForm = reactive<Notification>({
 })
 const userForm = reactive({ username: '', password: '', role: 'viewer' })
 const policyDrafts = reactive<Record<string, Policy>>({})
+const metricCache = reactive<Record<string, Metric>>({})
 
 const isAdmin = computed(() => user.value?.role === 'admin')
 const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value))
@@ -1271,8 +1289,32 @@ const canEditCompose = computed(() => isAdmin.value && (!selectedProject.value |
 const onlineNodes = computed(() => nodes.value.filter((node) => node.status === 'online'))
 const activeTasks = computed(() => tasks.value.filter((task) => task.status === 'pending' || task.status === 'running'))
 const failedTasks = computed(() => tasks.value.filter((task) => task.status === 'failed'))
-const memoryPercent = computed(() => percent(overview.last_metric.memory_used, overview.last_metric.memory_total))
-const diskPercent = computed(() => percent(overview.last_metric.disk_used, overview.last_metric.disk_total))
+const overviewMetricList = computed(() => {
+  const metrics = overview.node_metrics?.length
+    ? overview.node_metrics
+    : overview.last_metric.node_id
+      ? [overview.last_metric]
+      : []
+  return metrics
+})
+const overviewMetricByNode = computed(() => {
+  const values = new Map<string, Metric>()
+  for (const metric of Object.values(metricCache)) {
+    if (metric.node_id) {
+      values.set(metric.node_id, metric)
+    }
+  }
+  for (const metric of overviewMetricList.value) {
+    values.set(metric.node_id, metric)
+  }
+  return values
+})
+const dashboardNodeRows = computed<DashboardNodeRow[]>(() => {
+  return nodes.value.map((node) => ({
+    node,
+    metric: overviewMetricByNode.value.get(node.id)
+  }))
+})
 const shortCommit = computed(() => (versionInfo.commit && versionInfo.commit !== 'dev' ? versionInfo.commit.slice(0, 12) : versionInfo.commit || '-'))
 const latestReleaseVersion = computed(() => versionInfo.release?.latest_version || '')
 const currentThemeLabel = computed(() => themes.find((theme) => theme.value === themeName.value)?.label || '主题')
@@ -1608,11 +1650,17 @@ onMounted(() => {
       refreshAll()
     }
   }, REFRESH_INTERVAL_MS)
+  overviewTimer = window.setInterval(() => {
+    if (token.value && activeView.value === 'dashboard') {
+      refreshOverviewOnly()
+    }
+  }, OVERVIEW_REFRESH_INTERVAL_MS)
 })
 onUnmounted(() => {
   systemThemeQuery.removeEventListener('change', syncSystemTheme)
   if (clockTimer) window.clearInterval(clockTimer)
   if (refreshTimer) window.clearInterval(refreshTimer)
+  if (overviewTimer) window.clearInterval(overviewTimer)
 })
 watch(selectedNodeId, async (nodeId) => {
   if (nodeId) {
@@ -1750,6 +1798,35 @@ async function refreshAll(forceReleaseRefresh = false) {
   return refreshPromise
 }
 
+function applyOverviewData(overviewData: Overview) {
+  Object.assign(overview, overviewData)
+  const metrics = overviewData.node_metrics?.length
+    ? overviewData.node_metrics
+    : overviewData.last_metric?.node_id
+      ? [overviewData.last_metric]
+      : []
+  for (const metric of metrics) {
+    if (metric.node_id) {
+      metricCache[metric.node_id] = metric
+    }
+  }
+}
+
+async function refreshOverviewOnly() {
+  if (overviewPromise || refreshPromise) {
+    return overviewPromise || refreshPromise
+  }
+  overviewPromise = api.overview()
+    .then((overviewData) => {
+      applyOverviewData(overviewData)
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      overviewPromise = null
+    })
+  return overviewPromise
+}
+
 async function doRefreshAll(forceReleaseRefresh = false) {
   error.value = ''
   try {
@@ -1762,7 +1839,7 @@ async function doRefreshAll(forceReleaseRefresh = false) {
       isAdmin.value ? api.notifications() : Promise.resolve([]),
       api.version(forceReleaseRefresh)
     ])
-    Object.assign(overview, overviewData)
+    applyOverviewData(overviewData)
     nodes.value = nodesData
     tasks.value = tasksData
     updateRecords.value = recordsData
@@ -2008,7 +2085,7 @@ async function clearTasksScope(scope: 'finished' | 'failed', label: string) {
   selectedTask.value = null
   taskLogs.value = []
   await refreshTasks()
-  Object.assign(overview, await api.overview())
+  applyOverviewData(await api.overview())
 }
 
 async function openTask(task: Task) {
@@ -2472,6 +2549,92 @@ function compareVersions(left: string, right: string) {
 function percent(used: number, total: number) {
   if (!total) return 0
   return (used / total) * 100
+}
+
+function metricMemoryPercent(metric: Metric) {
+  return percent(metric.memory_used, metric.memory_total)
+}
+
+function metricDiskPercent(metric: Metric) {
+  return percent(metric.disk_used, metric.disk_total)
+}
+
+function metricDetailTitle(metric: Metric, kind: 'cpu' | 'memory' | 'disk') {
+  const nodeName = taskNodeName(metric.node_id)
+  if (kind === 'cpu') {
+    return `${nodeName}\nCPU：${formatPercent(metric.cpu_percent)}\n容器：${metric.container_count}`
+  }
+  if (kind === 'memory') {
+    return `${nodeName}\n内存：${formatBytes(metric.memory_used)} / ${formatBytes(metric.memory_total)}\n占用：${formatPercent(metricMemoryPercent(metric))}`
+  }
+  if (kind === 'disk') {
+    return `${nodeName}\n磁盘：${formatBytes(metric.disk_used)} / ${formatBytes(metric.disk_total)}\n占用：${formatPercent(metricDiskPercent(metric))}`
+  }
+  return nodeName
+}
+
+function nodeTitle(node: Node) {
+  return [
+    node.name,
+    `状态：${node.status || '-'}`,
+    `系统：${node.os || '-'}/${node.arch || '-'}`,
+    `Docker：${node.docker_version || '-'}`,
+    `Compose：${node.compose_version || '-'}`,
+    `Agent：${node.version ? `v${node.version}` : '-'}`,
+    `安装：${agentInstallModeLabel(node)}`,
+    `最近心跳：${node.last_seen || '-'}`
+  ].join('\n')
+}
+
+function nodeResourceTitle(row: DashboardNodeRow) {
+  const metric = row.metric
+  return [
+    nodeTitle(row.node),
+    metric ? `CPU：${formatPercent(metric.cpu_percent)}` : 'CPU：暂无数据',
+    metric ? `内存：${formatBytes(metric.memory_used)} / ${formatBytes(metric.memory_total)} (${formatPercent(metricMemoryPercent(metric))})` : '内存：暂无数据',
+    metric ? `硬盘：${formatBytes(metric.disk_used)} / ${formatBytes(metric.disk_total)} (${formatPercent(metricDiskPercent(metric))})` : '硬盘：暂无数据',
+    metric ? `资源上报：${metric.recorded_at || '-'}` : '资源上报：暂无'
+  ].join('\n')
+}
+
+function composeProjectTitle(project: ComposeProject) {
+  return [
+    project.name,
+    `路径：${project.path || '-'}`,
+    `归属：${composeOwnershipLabel(project)}`,
+    `状态：${detectionLabel(project)}`,
+    detectionMeta(project) ? `检测：${detectionMeta(project)}` : '',
+    detectionReason(project) ? `原因：${detectionReason(project)}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function taskTitleText(task: Task) {
+  return [
+    taskTitle(task.kind),
+    `节点：${taskNodeName(task.node_id)}`,
+    `状态：${statusText(task.status)}`,
+    `目标：${task.target_type || '-'} ${task.target_id || ''}`.trim(),
+    `任务 ID：${task.id}`,
+    taskMessage(task) ? `结果：${taskMessage(task)}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function shortTime(value?: string) {
+  if (!value) return '-'
+  const text = String(value)
+  if (text.length >= 16 && /^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return text.slice(5, 16)
+  }
+  return text.length > 16 ? `${text.slice(0, 16)}...` : text
+}
+
+function shortLabel(value?: string) {
+  if (!value) return '-'
+  return value.length > 13 ? `${value.slice(0, 13)}...` : value
 }
 
 function clampPercent(value: number) {

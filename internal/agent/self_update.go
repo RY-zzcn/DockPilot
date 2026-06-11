@@ -127,7 +127,7 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 		"-e", "DP_NODE_NAME=" + nodeName,
 		"-e", "DP_COMPOSE_DIRS=" + composeDirs,
 		"-e", "DP_UPDATE_CACHE_SECONDS=" + fmt.Sprint(durationSeconds(t.UpdateCacheTTL, 900)),
-		"-e", "DP_METRICS_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.MetricsInterval, 15)),
+		"-e", "DP_METRICS_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.MetricsInterval, 5)),
 		"-e", "DP_SNAPSHOT_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.SnapshotInterval, 60)),
 		"-e", "DP_RELEASE_REPO=" + repo,
 		"-e", "DP_AGENT_IMAGE=" + agentImage,

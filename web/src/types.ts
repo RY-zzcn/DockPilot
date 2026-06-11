@@ -22,6 +22,7 @@ export interface Overview {
   updates_available: number
   failed_tasks: number
   last_metric: Metric
+  node_metrics: Metric[]
 }
 
 export interface Node {
