@@ -21,6 +21,19 @@ const secretChecks = [
   { name: 'inline ssh private material', test: (content) => new RegExp(`OPENSSH ${privateKeyMarker}`).test(content) }
 ]
 
+const blockedRuntimeFiles = [
+  { name: 'runtime data directory', test: (file) => file === 'data' || file.startsWith('data/') },
+  { name: 'runtime log directory', test: (file) => file === 'logs' || file.startsWith('logs/') || file.includes('/logs/') },
+  { name: 'temporary work directory', test: (file) => file === '.tmp' || file.startsWith('.tmp/') },
+  { name: 'build output directory', test: (file) => file === 'dist' || file.startsWith('dist/') },
+  { name: 'local environment file', test: (file) => file.endsWith('/.env') || file === '.env' },
+  { name: 'local agent state', test: (file) => file.endsWith('/.dockpilot-agent.json') || file === '.dockpilot-agent.json' },
+  { name: 'runtime log file', test: (file) => /\.(log|pid)$/i.test(file) },
+  { name: 'runtime database file', test: (file) => /\.(db|sqlite)(-(shm|wal))?$/i.test(file) || /\.(db|sqlite)-(shm|wal)$/i.test(file) },
+  { name: 'local Compose backup', test: (file) => /^deploy\/.*\.bak-/.test(file) },
+  { name: 'local Compose override', test: (file) => file === 'deploy/docker-compose.override.yml' || file === 'deploy/docker-compose.local.yml' }
+]
+
 const docPlanPatterns = [
   { name: 'plan heading', regex: /^# .*计划\s*$/im },
   { name: 'implementation prompt', regex: /PLEASE IMPLEMENT THIS PLAN/i },
@@ -40,6 +53,12 @@ for (const file of files) {
 
 const failures = []
 for (const file of files) {
+  for (const check of blockedRuntimeFiles) {
+    if (check.test(file)) {
+      failures.push(`${file}: tracked ${check.name}`)
+    }
+  }
+
   const content = fs.readFileSync(file, 'utf8')
   for (const check of secretChecks) {
     if (check.test(content)) {

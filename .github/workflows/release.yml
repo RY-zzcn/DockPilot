@@ -287,6 +287,8 @@ jobs:
           file: deploy/Dockerfile.server
           platforms: linux/amd64,linux/arm64
           push: true
+          cache-from: type=gha,scope=dockpilot-server-image
+          cache-to: type=gha,scope=dockpilot-server-image,mode=max
           tags: |
             ${{ env.SERVER_IMAGE }}:${{ needs.resolve-release.outputs.tag }}
             ${{ env.SERVER_IMAGE }}:${{ needs.resolve-release.outputs.clean_version }}
@@ -326,6 +328,8 @@ jobs:
           file: deploy/Dockerfile.agent
           platforms: linux/amd64,linux/arm64
           push: true
+          cache-from: type=gha,scope=dockpilot-agent-image
+          cache-to: type=gha,scope=dockpilot-agent-image,mode=max
           tags: |
             ${{ env.AGENT_IMAGE }}:${{ needs.resolve-release.outputs.tag }}
             ${{ env.AGENT_IMAGE }}:${{ needs.resolve-release.outputs.clean_version }}

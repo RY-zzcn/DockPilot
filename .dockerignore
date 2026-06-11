@@ -5,12 +5,26 @@
 .npm-cache
 
 data
+logs
 dist
+build
+coverage
 web/dist
 web/node_modules
 
+*.log
+*.pid
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 .dockpilot-agent.json
 .env
+deploy/.env
+deploy/*.env
+deploy/*.log
+deploy/*.bak-*
+deploy/docker-compose.override.yml
+deploy/docker-compose.local.yml
