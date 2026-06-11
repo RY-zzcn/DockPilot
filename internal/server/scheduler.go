@@ -61,6 +61,11 @@ func (s *Scheduler) tick() {
 	if err := s.enqueueAgentUpdateTasks(); err != nil {
 		log.Printf("enqueue agent update tasks failed: %v", err)
 	}
+	if count, err := s.store.FailStaleRunningTasks(2 * time.Hour); err != nil {
+		log.Printf("fail stale running tasks failed: %v", err)
+	} else if count > 0 {
+		log.Printf("marked %d stale running tasks as failed", count)
+	}
 	if err := s.store.PruneTaskHistory(); err != nil {
 		log.Printf("prune task history failed: %v", err)
 	}
@@ -80,7 +85,10 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 			continue
 		}
 		for _, project := range state.ComposeProjects {
-			if s.detectionDue(node.ID, project.ID) {
+			if s.detectionDue(node.ID, project.ID, project.CheckedAt) {
+				if active, err := s.store.HasActiveTask(node.ID, "detect_updates", "compose", project.ID); err == nil && active {
+					continue
+				}
 				task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "detect_updates", "scheduler", "", Policy{})
 				if err == nil {
 					s.lastRun[detectionKey(node.ID, project.ID)] = time.Now()
@@ -105,6 +113,9 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 			if !due(policy, s.lastRun[key]) {
 				continue
 			}
+			if active, err := s.store.HasActiveTask(node.ID, "compose_update", "compose", project.ID); err == nil && active {
+				continue
+			}
 			task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "compose_update", "scheduler", policy.ID, policy)
 			if err != nil {
 				continue
@@ -116,8 +127,12 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 	return nil
 }
 
-func (s *Scheduler) detectionDue(nodeID, projectID string) bool {
-	return due(Policy{Schedule: DefaultDetectionSchedule}, s.lastRun[detectionKey(nodeID, projectID)])
+func (s *Scheduler) detectionDue(nodeID, projectID, checkedAt string) bool {
+	last := s.lastRun[detectionKey(nodeID, projectID)]
+	if last.IsZero() {
+		last = parseLocalTime(checkedAt)
+	}
+	return due(Policy{Schedule: DefaultDetectionSchedule}, last)
 }
 
 func detectionKey(nodeID, projectID string) string {
@@ -235,6 +250,19 @@ func due(policy Policy, last time.Time) bool {
 		}
 	}
 	return time.Since(last) >= interval
+}
+
+func parseLocalTime(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
 }
 
 func withinMaintenanceWindow(window string, now time.Time) bool {

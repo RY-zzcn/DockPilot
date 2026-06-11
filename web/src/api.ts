@@ -56,7 +56,7 @@ export const api = {
     })
   },
   me: () => request<AuthClaims>('/api/auth/me'),
-  version: () => request<VersionInfo>('/api/version'),
+  version: (refresh = false) => request<VersionInfo>(`/api/version${refresh ? '?refresh=1' : ''}`),
   overview: () => request<Overview>('/api/overview'),
   nodes: async () => asArray(await request<Node[] | null>('/api/nodes')),
   node: (id: string) => request<{ node: Node; online: boolean; docker: DockerState }>(`/api/nodes/${id}`),

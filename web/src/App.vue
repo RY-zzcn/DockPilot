@@ -335,7 +335,7 @@
                 </label>
                 <label>
                   <span>Agent 版本</span>
-                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.16" />
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.17" />
                 </label>
                 <div class="install-mode">
                   <span>安装方式</span>
@@ -699,9 +699,11 @@
                 <button :class="{ active: row.policy.mode === 'scheduled' }" @click="row.policy.mode = 'scheduled'">按计划</button>
                 <button :class="{ active: row.policy.mode === 'automatic' }" @click="row.policy.mode = 'automatic'">自动更新</button>
               </div>
-              <input v-model="row.policy.schedule" class="schedule-input" placeholder="自动更新间隔 interval:1h / @daily" />
+              <select v-model="row.policy.schedule" class="schedule-input" title="自动更新间隔">
+                <option v-for="option in policyScheduleOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+              </select>
               <input v-model="row.policy.maintenance_window" class="schedule-input" placeholder="维护窗口 02:00-05:00" />
-              <input v-model="row.policy.healthcheck_url" class="schedule-input" placeholder="健康检查 URL" />
+              <input v-model="row.policy.healthcheck_url" class="schedule-input" placeholder="健康检查 URL，可留空" />
               <input v-model="row.policy.exclude_patterns" class="schedule-input" placeholder="不自动更新的关键字" />
               <label class="checkline compact-check">
                 <input v-model="row.policy.rollback_on_failure" type="checkbox" />
@@ -1099,11 +1101,19 @@ interface Toast {
 }
 
 const THEME_KEY = 'dockpilot.theme'
-const REFRESH_INTERVAL_MS = 10000
+const REFRESH_INTERVAL_MS = 30000
 const themes: { value: ThemeName; label: string }[] = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '蓝白' },
   { value: 'dark', label: '夜间' }
+]
+const policyScheduleOptions = [
+  { value: 'interval:1h', label: '每 1 小时' },
+  { value: 'interval:2h', label: '每 2 小时' },
+  { value: 'interval:3h', label: '每 3 小时' },
+  { value: 'interval:6h', label: '每 6 小时' },
+  { value: 'interval:12h', label: '每 12 小时' },
+  { value: '@daily', label: '每天一次' }
 ]
 const commandTabs: { value: CommandCategory; label: string }[] = [
   { value: 'quick', label: '快速' },
@@ -1148,6 +1158,7 @@ const currentClock = ref('')
 let clockTimer: number | undefined
 let refreshTimer: number | undefined
 let refreshPromise: Promise<void> | null = null
+let dockerLoadSerial = 0
 let toastID = 0
 const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
@@ -1522,12 +1533,12 @@ const PolicyEditor = defineComponent({
           h('option', { value: 'scheduled' }, '按计划更新'),
           h('option', { value: 'automatic' }, '检测到更新后自动更新')
         ]),
-        h('input', {
+        h('select', {
           value: props.policy.schedule,
           disabled: props.disabled,
-          placeholder: '自动更新间隔 interval:1h / @daily',
-          onInput: (event: Event) => (props.policy.schedule = (event.target as HTMLInputElement).value)
-        }),
+          title: '自动更新间隔',
+          onChange: (event: Event) => (props.policy.schedule = (event.target as HTMLSelectElement).value)
+        }, policyScheduleOptions.map((option) => h('option', { value: option.value }, option.label))),
         h('input', {
           value: props.policy.maintenance_window || '',
           disabled: props.disabled,
@@ -1726,20 +1737,20 @@ async function runAction<T>(key: string, startMessage: string, successMessage: s
 }
 
 async function manualRefresh() {
-  await runAction('refresh', '正在刷新', '数据已刷新', refreshAll)
+  await runAction('refresh', '正在刷新', '数据已刷新', () => refreshAll(true))
 }
 
-async function refreshAll() {
+async function refreshAll(forceReleaseRefresh = false) {
   if (refreshPromise) {
     return refreshPromise
   }
-  refreshPromise = doRefreshAll().finally(() => {
+  refreshPromise = doRefreshAll(forceReleaseRefresh).finally(() => {
     refreshPromise = null
   })
   return refreshPromise
 }
 
-async function doRefreshAll() {
+async function doRefreshAll(forceReleaseRefresh = false) {
   error.value = ''
   try {
     const [overviewData, nodesData, tasksData, recordsData, policiesData, notificationsData, versionData] = await Promise.all([
@@ -1749,7 +1760,7 @@ async function doRefreshAll() {
       api.updateRecords(),
       api.policies(),
       isAdmin.value ? api.notifications() : Promise.resolve([]),
-      api.version()
+      api.version(forceReleaseRefresh)
     ])
     Object.assign(overview, overviewData)
     nodes.value = nodesData
@@ -1762,13 +1773,15 @@ async function doRefreshAll() {
       Object.assign(runtimeSettings, versionData.settings)
     }
     syncPolicyDrafts()
-    await loadDashboardDocker(nodes.value)
+    if (activeView.value === 'dashboard' || (activeView.value === 'projects' && !selectedNodeId.value)) {
+      await loadDashboardDocker(nodes.value)
+    }
     if (selectedNodeId.value && nodes.value.some((node) => node.id === selectedNodeId.value)) {
       await loadDocker(selectedNodeId.value)
     } else if (selectedNodeId.value) {
       selectedNodeId.value = ''
     }
-    if (isAdmin.value) {
+    if (isAdmin.value && (!installInfo.install_script || activeView.value === 'settings')) {
       await loadAdminSettings()
     }
     await refreshSelectedTask(tasksData)
@@ -1805,7 +1818,11 @@ async function loadDashboardDocker(nodeList = nodes.value) {
 }
 
 async function loadDocker(nodeId: string) {
+  const requestID = ++dockerLoadSerial
   const state = await api.dockerState(nodeId)
+  if (requestID !== dockerLoadSerial || selectedNodeId.value !== nodeId) {
+    return
+  }
   dockerState.containers = state.containers
   dockerState.images = state.images
   dockerState.compose_projects = state.compose_projects
@@ -2102,7 +2119,7 @@ function policyDraftFor(scope: string, scopeId: string): Policy {
           scope,
           scope_id: scopeId,
           mode: 'manual',
-          schedule: 'interval:1h',
+          schedule: 'interval:6h',
           maintenance_window: '',
           healthcheck_url: '',
           rollback_on_failure: false,

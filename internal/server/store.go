@@ -26,8 +26,8 @@ const (
 	PolicyAutomatic = "automatic"
 
 	DefaultPolicyMode        = PolicyManual
-	DefaultPolicySchedule    = "interval:1h"
-	DefaultDetectionSchedule = "interval:1h"
+	DefaultPolicySchedule    = "interval:6h"
+	DefaultDetectionSchedule = "interval:6h"
 
 	TaskPending  = "pending"
 	TaskRunning  = "running"
@@ -1194,6 +1194,20 @@ func (s *Store) PendingTasksForNode(nodeID string) ([]Task, error) {
 	return tasks, rows.Err()
 }
 
+func (s *Store) HasActiveTask(nodeID, kind, targetType, targetID string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`
+SELECT COUNT(1)
+FROM tasks
+WHERE node_id = ?
+  AND kind = ?
+  AND target_type = ?
+  AND target_id = ?
+  AND status IN (?, ?)`,
+		nodeID, kind, targetType, targetID, TaskPending, TaskRunning).Scan(&count)
+	return count > 0, err
+}
+
 func (s *Store) MarkTaskRunning(id string) error {
 	_, err := s.db.Exec(`UPDATE tasks SET status = ?, started_at = CASE WHEN started_at = '' THEN datetime('now','localtime') ELSE started_at END WHERE id = ?`, TaskRunning, id)
 	return err
@@ -1202,6 +1216,57 @@ func (s *Store) MarkTaskRunning(id string) error {
 func (s *Store) FinishTask(id, status, result string) error {
 	_, err := s.db.Exec(`UPDATE tasks SET status = ?, result = ?, finished_at = datetime('now','localtime') WHERE id = ?`, status, result, id)
 	return err
+}
+
+func (s *Store) FailStaleRunningTasks(timeout time.Duration) (int64, error) {
+	if timeout <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().In(time.Local).Add(-timeout).Format("2006-01-02 15:04:05")
+	rows, err := s.db.Query(`
+SELECT id
+FROM tasks
+WHERE status = ?
+  AND COALESCE(NULLIF(started_at, ''), created_at) < ?`,
+		TaskRunning, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result, _ := json.Marshal(map[string]string{
+		"message": "任务运行超过 2 小时仍未返回结果，已自动标记为失败。节点可能已重启、断线，或任务结果未能回传。",
+	})
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		if _, err := tx.Exec(`UPDATE tasks SET status = ?, result = ?, finished_at = datetime('now','localtime') WHERE id = ? AND status = ?`, TaskFailed, string(result), id, TaskRunning); err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(`INSERT INTO task_logs(task_id, line, created_at) VALUES(?,?,datetime('now','localtime'))`, id, "任务运行超过 2 小时未返回结果，系统已自动结束该任务。"); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return int64(len(ids)), nil
 }
 
 func (s *Store) InsertUpdateRecords(task Task, changes []protocol.ImageChange) error {

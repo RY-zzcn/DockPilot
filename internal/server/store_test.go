@@ -245,6 +245,52 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestHasActiveTaskAndFailStaleRunningTasks(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	task, err := store.CreateTask(Task{NodeID: "node-1", Kind: "detect_updates", TargetType: "compose", TargetID: "compose-1", RequestedBy: "scheduler"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	active, err := store.HasActiveTask("node-1", "detect_updates", "compose", "compose-1")
+	if err != nil {
+		t.Fatalf("has active task: %v", err)
+	}
+	if !active {
+		t.Fatalf("pending task should count as active")
+	}
+	if err := store.MarkTaskRunning(task.ID); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	if _, err := store.db.Exec(`UPDATE tasks SET started_at = datetime('now','localtime','-3 hours') WHERE id = ?`, task.ID); err != nil {
+		t.Fatalf("age task: %v", err)
+	}
+	count, err := store.FailStaleRunningTasks(2 * time.Hour)
+	if err != nil {
+		t.Fatalf("fail stale running tasks: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one stale task, got %d", count)
+	}
+	failed, err := store.GetTask(task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if failed.Status != TaskFailed || failed.FinishedAt == "" || !strings.Contains(failed.Result, "超过 2 小时") {
+		t.Fatalf("task was not failed with a clear reason: %#v", failed)
+	}
+	active, err = store.HasActiveTask("node-1", "detect_updates", "compose", "compose-1")
+	if err != nil {
+		t.Fatalf("has active task after failure: %v", err)
+	}
+	if active {
+		t.Fatalf("failed task should not count as active")
+	}
+}
+
 func TestUpdateRecords(t *testing.T) {
 	store := testStore(t)
 	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
