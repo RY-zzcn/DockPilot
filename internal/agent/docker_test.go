@@ -317,6 +317,21 @@ func TestUpdateAvailableUsesManifestDigestBeforeConfig(t *testing.T) {
 	}
 }
 
+func TestUpdateAvailableDetectsMixedRuntimeManifestDigests(t *testing.T) {
+	local := localImageInfo{
+		ManifestDigests: []string{
+			"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		},
+	}
+	remote := remoteImageInfo{
+		ManifestDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+	}
+	if !updateAvailable(local, remote) {
+		t.Fatalf("one stale runtime manifest should need update")
+	}
+}
+
 func TestRawManifestPlatformMatch(t *testing.T) {
 	raw := `{
   "schemaVersion": 2,
@@ -368,6 +383,23 @@ func TestDetectorUsesRegistryConfigDigest(t *testing.T) {
 	}
 }
 
+func TestDetectorUsesRuntimeLocalDigestOverride(t *testing.T) {
+	detector := NewUpdateDetector(time.Minute)
+	detector.registry = func(context.Context, string, platformSpec) (remoteImageInfo, error) {
+		return remoteImageInfo{
+			ManifestDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			Method:         "registry",
+		}, nil
+	}
+	result := detector.DetectWithLocal(context.Background(), "nginx:latest", localImageInfo{
+		ManifestDigests: []string{"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+		Platform:        platformSpec{OS: "linux", Architecture: "amd64"},
+	})
+	if !result.UpdateAvailable || result.LocalManifestDigest != "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" {
+		t.Fatalf("runtime local digest should drive update result: %#v", result)
+	}
+}
+
 func TestDetectorUsesContainerManifestDigest(t *testing.T) {
 	detector := NewUpdateDetector(time.Minute)
 	detector.command = func(ctx context.Context, name string, args ...string) (string, error) {
@@ -409,5 +441,49 @@ func TestDetectorFallsBackToCLI(t *testing.T) {
 	result := detector.Detect(context.Background(), "nginx:stable")
 	if !result.UpdateAvailable || result.Method != "cli" {
 		t.Fatalf("unexpected cli fallback result: %#v", result)
+	}
+}
+
+func TestParseRuntimeImageInfos(t *testing.T) {
+	out := `[{
+  "Image": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "Config": {"Image": "nginx:latest"},
+  "ImageManifestDescriptor": {"digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+}]`
+	infos := parseRuntimeImageInfos(out)
+	if len(infos) != 1 {
+		t.Fatalf("expected one runtime image, got %#v", infos)
+	}
+	if infos[0].Image != "nginx:latest" {
+		t.Fatalf("unexpected runtime image: %#v", infos[0])
+	}
+	if infos[0].Local.ConfigDigest != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("unexpected config digest: %#v", infos[0].Local)
+	}
+	if infos[0].Local.ManifestDigests[0] != "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("unexpected manifest digest: %#v", infos[0].Local)
+	}
+}
+
+func TestComposeFileImagesFallbackParsesYaml(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "compose.yml")
+	raw := []byte(`services:
+  web:
+    image: nginx:latest
+  worker:
+    image: ${WORKER_IMAGE}
+  local:
+    build: .
+`)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	images, err := composeFileImages(path)
+	if err != nil {
+		t.Fatalf("composeFileImages: %v", err)
+	}
+	if len(images) != 1 || images[0] != "nginx:latest" {
+		t.Fatalf("unexpected fallback images: %#v", images)
 	}
 }

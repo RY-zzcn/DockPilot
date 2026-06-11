@@ -633,7 +633,8 @@ func TestFallbackUpdateDetectionUsesImageResultStatus(t *testing.T) {
 		TargetID:    "compose-1",
 		ProjectName: "site",
 		Path:        "/opt/site/compose.yml",
-		Error:       "compose config failed; using runtime images",
+		Reason:      "Compose 配置未完整解析，已使用兜底方式完成镜像检测",
+		Advice:      "请补齐项目 .env",
 		Images: []protocol.ImageUpdateDetection{{
 			Image:           "nginx:stable",
 			Method:          "registry",
@@ -643,6 +644,15 @@ func TestFallbackUpdateDetectionUsesImageResultStatus(t *testing.T) {
 	}})
 	if err != nil {
 		t.Fatalf("apply fallback detection: %v", err)
+	}
+	if failed := failedDetections([]protocol.UpdateDetection{{
+		Reason: "Compose 配置未完整解析，已使用兜底方式完成镜像检测",
+		Images: []protocol.ImageUpdateDetection{{
+			Image:           "nginx:stable",
+			UpdateAvailable: false,
+		}},
+	}}); failed != 0 {
+		t.Fatalf("fallback detection with successful image results should not count as failed, got %d", failed)
 	}
 	state, err := store.DockerState("node-1")
 	if err != nil {

@@ -51,6 +51,7 @@ type platformSpec struct {
 
 type localImageInfo struct {
 	ConfigDigest    string
+	ConfigDigests   []string
 	RepoDigests     []string
 	ManifestDigests []string
 	Platform        platformSpec
@@ -81,20 +82,31 @@ func (d *UpdateDetector) Detect(ctx context.Context, image string) protocol.Imag
 	if d == nil {
 		d = NewUpdateDetector(15 * time.Minute)
 	}
+	local, _ := d.localImageInfo(ctx, image)
+	return d.detectWithLocal(ctx, image, local)
+}
+
+func (d *UpdateDetector) DetectWithLocal(ctx context.Context, image string, local localImageInfo) protocol.ImageUpdateDetection {
+	if d == nil {
+		d = NewUpdateDetector(15 * time.Minute)
+	}
+	return d.detectWithLocal(ctx, image, local)
+}
+
+func (d *UpdateDetector) detectWithLocal(ctx context.Context, image string, local localImageInfo) protocol.ImageUpdateDetection {
 	checkedAt := d.now().Format(time.RFC3339)
 	result := protocol.ImageUpdateDetection{
 		Image:     image,
 		CheckedAt: checkedAt,
 	}
-	local, _ := d.localImageInfo(ctx, image)
 	platform := local.Platform
 	if platform.empty() {
 		platform = defaultPlatform()
 	}
 	result.Platform = platform.String()
-	result.LocalConfigDigest = local.ConfigDigest
+	result.LocalConfigDigest = firstDigest(localConfigDigests(local), local.ConfigDigest)
 	result.LocalManifestDigest = firstDigest(local.ManifestDigests, "")
-	result.LocalDigest = firstDigest(local.ManifestDigests, firstDigest(local.RepoDigests, local.ConfigDigest))
+	result.LocalDigest = firstDigest(local.ManifestDigests, firstDigest(local.RepoDigests, result.LocalConfigDigest))
 
 	if pinnedDigest := digestFromReference(image); pinnedDigest != "" {
 		result.Method = "pinned"
@@ -123,6 +135,10 @@ func (d *UpdateDetector) localImageInfo(ctx context.Context, image string) (loca
 	if err != nil {
 		return localImageInfo{Missing: true}, fmt.Errorf("local image is missing or unavailable")
 	}
+	return localImageInfoFromInspectOutput(out, d.localContainerManifestDigests(ctx, image))
+}
+
+func localImageInfoFromInspectOutput(out string, manifestDigests []string) (localImageInfo, error) {
 	var raw []struct {
 		ID           string   `json:"Id"`
 		RepoDigests  []string `json:"RepoDigests"`
@@ -134,6 +150,7 @@ func (d *UpdateDetector) localImageInfo(ctx context.Context, image string) (loca
 		return localImageInfo{Missing: true}, fmt.Errorf("local image inspect output is invalid")
 	}
 	imageInfo := raw[0]
+	configDigest := digestOnly(imageInfo.ID)
 	var repoDigests []string
 	for _, repoDigest := range imageInfo.RepoDigests {
 		if digest := digestFromReference(repoDigest); digest != "" {
@@ -141,9 +158,10 @@ func (d *UpdateDetector) localImageInfo(ctx context.Context, image string) (loca
 		}
 	}
 	return localImageInfo{
-		ConfigDigest:    digestOnly(imageInfo.ID),
+		ConfigDigest:    configDigest,
+		ConfigDigests:   uniqueDigests([]string{configDigest}),
 		RepoDigests:     repoDigests,
-		ManifestDigests: d.localContainerManifestDigests(ctx, image),
+		ManifestDigests: uniqueDigests(manifestDigests),
 		Platform: platformSpec{
 			OS:           imageInfo.OS,
 			Architecture: imageInfo.Architecture,
@@ -494,23 +512,21 @@ func updateAvailable(local localImageInfo, remote remoteImageInfo) bool {
 	if local.Missing {
 		return true
 	}
-	for _, digest := range local.ManifestDigests {
-		if digestOnly(digest) == digestOnly(remote.ManifestDigest) {
-			return false
-		}
+	manifestDigests := uniqueDigests(local.ManifestDigests)
+	if remote.ManifestDigest != "" && len(manifestDigests) > 0 {
+		return !allDigestsMatch(manifestDigests, remote.ManifestDigest)
 	}
-	if local.ConfigDigest != "" && remote.ConfigDigest != "" && digestOnly(local.ConfigDigest) == digestOnly(remote.ConfigDigest) {
+	if remote.ManifestDigest != "" && containsDigest(local.RepoDigests, remote.ManifestDigest) {
 		return false
 	}
-	for _, digest := range local.RepoDigests {
-		if digestOnly(digest) == digestOnly(remote.ManifestDigest) {
-			return false
-		}
+	configDigests := localConfigDigests(local)
+	if remote.ConfigDigest != "" && len(configDigests) > 0 {
+		return !allDigestsMatch(configDigests, remote.ConfigDigest)
 	}
-	if len(local.ManifestDigests) > 0 && remote.ManifestDigest != "" {
+	if len(manifestDigests) > 0 && remote.ManifestDigest != "" {
 		return true
 	}
-	if local.ConfigDigest != "" && remote.ConfigDigest != "" {
+	if len(configDigests) > 0 && remote.ConfigDigest != "" {
 		return true
 	}
 	if remote.ManifestDigest != "" && len(local.RepoDigests) > 0 {
@@ -520,6 +536,55 @@ func updateAvailable(local localImageInfo, remote remoteImageInfo) bool {
 		return true
 	}
 	return false
+}
+
+func localConfigDigests(local localImageInfo) []string {
+	values := append([]string{}, local.ConfigDigests...)
+	if local.ConfigDigest != "" {
+		values = append(values, local.ConfigDigest)
+	}
+	return uniqueDigests(values)
+}
+
+func uniqueDigests(values []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		digest := digestOnly(value)
+		if digest == "" || seen[digest] {
+			continue
+		}
+		seen[digest] = true
+		out = append(out, digest)
+	}
+	return out
+}
+
+func containsDigest(values []string, target string) bool {
+	target = digestOnly(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if digestOnly(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func allDigestsMatch(values []string, target string) bool {
+	digests := uniqueDigests(values)
+	target = digestOnly(target)
+	if len(digests) == 0 || target == "" {
+		return false
+	}
+	for _, digest := range digests {
+		if digest != target {
+			return false
+		}
+	}
+	return true
 }
 
 func firstDigest(values []string, fallback string) string {

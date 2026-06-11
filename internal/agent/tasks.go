@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dockpilot/dockpilot/internal/protocol"
+	"gopkg.in/yaml.v3"
 )
 
 type TaskExecutor struct {
@@ -160,20 +161,26 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 		detection.Advice = "请在节点端调整 DOCKPILOT_COMPOSE_DIRS，或把项目放到允许目录后再检测"
 		return detection, err
 	}
+	runtimeInfos := composeRuntimeImageInfos(ctx, name)
+	runtimeImages := runtimeImageReferences(runtimeInfos)
+	runtimeLocals := runtimeLocalByImage(runtimeInfos)
 	images, err := composeImages(ctx, path)
 	if err != nil {
-		runtimeImages := composeRuntimeImages(ctx, name)
-		if len(runtimeImages) == 0 {
+		fileImages, fileErr := composeFileImages(path)
+		images = mergeImageReferences(runtimeImages, fileImages)
+		if len(images) == 0 {
 			detection.Error = err.Error()
 			detection.Reason, detection.Advice = friendlyDetectionFailure(err.Error())
+			if fileErr != nil {
+				detection.Error += "; compose file fallback failed: " + fileErr.Error()
+			}
 			return detection, err
 		}
-		detection.Error = err.Error()
-		detection.Reason, detection.Advice = friendlyDetectionFailure(err.Error())
-		images = runtimeImages
-		logLine("Compose config check failed; falling back to images from existing project containers: " + err.Error())
+		detection.Reason = "Compose 配置未完整解析，已使用兜底方式完成镜像检测"
+		detection.Advice = "这通常发生在 1Panel 或依赖 .env 的项目中；建议补齐项目 .env，或确认运行中容器镜像与 Compose 文件一致"
+		logLine("Compose config check failed; falling back to runtime/file image references: " + err.Error())
 	} else {
-		images = mergeImageReferences(images, composeRuntimeImages(ctx, name))
+		images = mergeImageReferences(images, runtimeImages)
 	}
 	if len(images) == 0 {
 		logLine("No image references found in compose config: " + path)
@@ -186,7 +193,12 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 	}
 	failedImages := 0
 	for _, image := range images {
-		item := detector.Detect(ctx, image)
+		var item protocol.ImageUpdateDetection
+		if local, ok := runtimeLocals[image]; ok {
+			item = detector.DetectWithLocal(ctx, image, local)
+		} else {
+			item = detector.Detect(ctx, image)
+		}
 		item.Status, item.Reason, item.Advice = imageDetectionStatus(item)
 		detection.Images = append(detection.Images, item)
 		switch {
@@ -208,10 +220,8 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 		} else {
 			detection.Error = imageError
 		}
-		if detection.Reason == "" {
-			detection.Reason = "部分镜像无法完成更新检测"
-			detection.Advice = "请查看失败镜像的原因；常见原因包括私有仓库未登录、网络超时、镜像标签不存在或 registry 权限不足"
-		}
+		detection.Reason = "部分镜像无法完成更新检测"
+		detection.Advice = "请查看失败镜像的原因；常见原因包括私有仓库未登录、网络超时、镜像标签不存在或 registry 权限不足"
 	}
 	return detection, nil
 }
@@ -432,16 +442,152 @@ func parseComposeConfigImages(out string) ([]string, bool) {
 	return images, true
 }
 
+func composeFileImages(path string) ([]string, error) {
+	path = composeFilePath(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("compose path is a directory: %s", path)
+	}
+	if info.Size() > 1024*1024 {
+		return nil, fmt.Errorf("compose file is too large for fallback parsing: %s", path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return nil, err
+	}
+	doc := &root
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		doc = root.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("compose file root is not a mapping")
+	}
+	services := mappingValue(doc, "services")
+	if services == nil || services.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("compose file has no services mapping")
+	}
+	var images []string
+	for i := 0; i+1 < len(services.Content); i += 2 {
+		service := services.Content[i+1]
+		if service.Kind != yaml.MappingNode {
+			continue
+		}
+		image := mappingValue(service, "image")
+		if image == nil || image.Kind != yaml.ScalarNode {
+			continue
+		}
+		images = append(images, image.Value)
+	}
+	return mergeImageReferences(images), nil
+}
+
+type runtimeImageInfo struct {
+	Image string
+	Local localImageInfo
+}
+
 func composeRuntimeImages(ctx context.Context, projectName string) []string {
+	return runtimeImageReferences(composeRuntimeImageInfos(ctx, projectName))
+}
+
+func composeRuntimeImageInfos(ctx context.Context, projectName string) []runtimeImageInfo {
 	projectName = strings.TrimSpace(projectName)
 	if projectName == "" {
 		return nil
 	}
-	out, err := commandStdout(ctx, "docker", "ps", "-a", "--filter", "label=com.docker.compose.project="+projectName, "--format", "{{.Image}}")
+	out, err := commandStdout(ctx, "docker", "ps", "-aq", "--filter", "label=com.docker.compose.project="+projectName)
 	if err != nil {
 		return nil
 	}
-	return parseComposeImages(out)
+	ids := strings.Fields(out)
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"inspect"}, ids...)
+	out, err = commandStdout(ctx, "docker", args...)
+	if err != nil {
+		return nil
+	}
+	return parseRuntimeImageInfos(out)
+}
+
+func parseRuntimeImageInfos(out string) []runtimeImageInfo {
+	var raw []struct {
+		Image  string `json:"Image"`
+		Config struct {
+			Image string `json:"Image"`
+		} `json:"Config"`
+		ImageManifestDescriptor struct {
+			Digest string `json:"digest"`
+		} `json:"ImageManifestDescriptor"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil
+	}
+	var infos []runtimeImageInfo
+	for _, item := range raw {
+		image := strings.TrimSpace(item.Config.Image)
+		if !isComposeImageReference(image) {
+			continue
+		}
+		configDigest := digestOnly(item.Image)
+		manifestDigest := digestOnly(item.ImageManifestDescriptor.Digest)
+		infos = append(infos, runtimeImageInfo{
+			Image: image,
+			Local: localImageInfo{
+				ConfigDigest:    configDigest,
+				ConfigDigests:   uniqueDigests([]string{configDigest}),
+				ManifestDigests: uniqueDigests([]string{manifestDigest}),
+			},
+		})
+	}
+	return infos
+}
+
+func runtimeImageReferences(infos []runtimeImageInfo) []string {
+	var images []string
+	for _, info := range infos {
+		images = append(images, info.Image)
+	}
+	return mergeImageReferences(images)
+}
+
+func runtimeLocalByImage(infos []runtimeImageInfo) map[string]localImageInfo {
+	byImage := map[string]localImageInfo{}
+	for _, info := range infos {
+		if info.Image == "" {
+			continue
+		}
+		current, ok := byImage[info.Image]
+		if !ok {
+			byImage[info.Image] = info.Local
+			continue
+		}
+		byImage[info.Image] = mergeLocalImageInfo(current, info.Local)
+	}
+	return byImage
+}
+
+func mergeLocalImageInfo(left, right localImageInfo) localImageInfo {
+	out := left
+	out.ConfigDigests = uniqueDigests(append(localConfigDigests(left), localConfigDigests(right)...))
+	if out.ConfigDigest == "" {
+		out.ConfigDigest = right.ConfigDigest
+	}
+	out.ManifestDigests = uniqueDigests(append(left.ManifestDigests, right.ManifestDigests...))
+	out.RepoDigests = uniqueDigests(append(left.RepoDigests, right.RepoDigests...))
+	if out.Platform.empty() {
+		out.Platform = right.Platform
+	}
+	out.Missing = left.Missing && right.Missing
+	return out
 }
 
 func mergeImageReferences(groups ...[]string) []string {
@@ -469,7 +615,7 @@ func isComposeImageReference(value string) bool {
 	if strings.ContainsAny(value, " \t\r\n\"'") {
 		return false
 	}
-	if strings.HasPrefix(value, "-") || strings.Contains(value, "://") {
+	if strings.HasPrefix(value, "-") || strings.Contains(value, "://") || strings.ContainsAny(value, "${}") {
 		return false
 	}
 	return strings.Contains(value, "/") || strings.Contains(value, ":") || strings.Contains(value, "@") || !strings.Contains(value, "=")
