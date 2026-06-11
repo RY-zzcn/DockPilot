@@ -30,6 +30,15 @@ func TestParseLabels(t *testing.T) {
 	}
 }
 
+func TestAgentInstallModeUsesConfiguredValue(t *testing.T) {
+	if got := agentInstallMode("docker"); got != "docker" {
+		t.Fatalf("docker install mode = %q", got)
+	}
+	if got := agentInstallMode(" BINARY "); got != "binary" {
+		t.Fatalf("binary install mode = %q", got)
+	}
+}
+
 func TestConfigCapabilitiesDefaultDangerousOperationsOff(t *testing.T) {
 	capabilities := Config{}.Capabilities()
 	if !capabilities["detect_updates"] || !capabilities["docker_snapshot"] || !capabilities["metrics"] {

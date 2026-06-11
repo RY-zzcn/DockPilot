@@ -283,7 +283,7 @@
             >
               <span class="status-dot" :class="node.status"></span>
               <strong>{{ node.name }}</strong>
-              <small>{{ node.os || '-' }}/{{ node.arch || '-' }}</small>
+              <small>{{ agentInstallModeLabel(node) }} · {{ node.os || '-' }}/{{ node.arch || '-' }}</small>
               <em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em>
             </button>
           </div>
@@ -299,6 +299,7 @@
               <span>Docker <strong>{{ selectedNode?.docker_version || '-' }}</strong></span>
               <span>Compose <strong>{{ selectedNode?.compose_version || '-' }}</strong></span>
               <span>Agent <strong>{{ selectedNode?.version ? `v${selectedNode.version}` : '-' }}</strong></span>
+              <span>安装 <strong>{{ agentInstallModeLabel(selectedNode) }}</strong></span>
               <span>心跳 <strong>{{ selectedNode?.last_seen || '-' }}</strong></span>
             </div>
             <div class="button-row">
@@ -334,7 +335,7 @@
                 </label>
                 <label>
                   <span>Agent 版本</span>
-                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.15" />
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.16" />
                 </label>
                 <div class="install-mode">
                   <span>安装方式</span>
@@ -497,6 +498,9 @@
                 </button>
               </div>
               <div class="capability-grid">
+                <span class="capability-chip" :class="{ enabled: agentInstallMode(selectedNode) !== 'unknown' }">
+                  安装 · {{ agentInstallModeLabel(selectedNode) }}
+                </span>
                 <span v-for="item in capabilityItems(selectedNode)" :key="item.label" class="capability-chip" :class="{ enabled: item.enabled }">
                   {{ item.label }} · {{ item.enabled ? '允许' : '关闭' }}
                 </span>
@@ -1309,7 +1313,17 @@ const filteredNodes = computed(() => {
   const keyword = nodeSearch.value.trim().toLowerCase()
   if (!keyword) return nodes.value
   return nodes.value.filter((node) =>
-    [node.name, node.id, node.note, node.os, node.arch, node.docker_version, node.compose_version]
+    [
+      node.name,
+      node.id,
+      node.note,
+      node.os,
+      node.arch,
+      node.docker_version,
+      node.compose_version,
+      agentInstallMode(node),
+      agentInstallModeLabel(node)
+    ]
       .filter(Boolean)
       .some((value) => value.toLowerCase().includes(keyword))
   )
@@ -2326,6 +2340,30 @@ function parseNodeCapabilities(node?: Node) {
   } catch {
     return {}
   }
+}
+
+function parseNodeLabels(node?: Node) {
+  if (!node?.labels) return {}
+  try {
+    return JSON.parse(node.labels) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
+function agentInstallMode(node?: Node) {
+  const mode = (parseNodeLabels(node).install_mode || '').toLowerCase()
+  if (mode === 'docker' || mode === 'binary') return mode
+  return 'unknown'
+}
+
+function agentInstallModeLabel(node?: Node) {
+  const labels: Record<string, string> = {
+    docker: 'Docker',
+    binary: '二进制',
+    unknown: '未知'
+  }
+  return labels[agentInstallMode(node)] || '未知'
 }
 
 function canRunTask(node: Node | undefined, kind: string) {

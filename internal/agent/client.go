@@ -70,7 +70,10 @@ func (c *Client) connectOnce(ctx context.Context) error {
 		return conn.WriteJSON(msg)
 	}
 
-	labels := map[string]string{"runtime": "docker-cli"}
+	labels := map[string]string{
+		"runtime":      "docker-cli",
+		"install_mode": agentInstallMode(c.cfg.InstallMode),
+	}
 	if daemonID := c.docker.DaemonID(ctx); daemonID != "" {
 		labels["docker_daemon_id"] = daemonID
 	}
@@ -134,6 +137,15 @@ func (c *Client) connectOnce(ctx context.Context) error {
 			log.Printf("server error: %s %s", payload.Code, payload.Message)
 		}
 	}
+}
+
+func agentInstallMode(configured string) string {
+	mode := strings.ToLower(strings.TrimSpace(configured))
+	switch mode {
+	case "docker", "binary":
+		return mode
+	}
+	return detectInstallMode()
 }
 
 func (c *Client) reportLoop(ctx context.Context, stop <-chan struct{}, send func(protocol.Message) error) {
