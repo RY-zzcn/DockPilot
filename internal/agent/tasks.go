@@ -29,6 +29,8 @@ type TaskExecutor struct {
 	InstallMode        string
 	ReleaseRepo        string
 	AgentImage         string
+	SelfUpdate         bool
+	SelfUpdateInterval time.Duration
 	AllowAgentUpdate   bool
 	AllowComposeUpdate bool
 	AllowDeploy        bool

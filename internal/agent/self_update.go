@@ -96,7 +96,15 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 	if serverURL == "" {
 		return fmt.Errorf("server_url is required for docker agent update")
 	}
-	targetImage := dockerImageRef(agentImage, targetVersion)
+	clean, err := resolveReleaseVersion(ctx, repo, targetVersion)
+	if err != nil {
+		return err
+	}
+	if version.Compare(version.Version, clean) >= 0 {
+		logLine(fmt.Sprintf("Agent Docker image is already up to date: current=%s latest=%s.", version.Version, clean))
+		return nil
+	}
+	targetImage := dockerImageRef(agentImage, clean)
 	helperImage := currentContainerImage(ctx, agentImage)
 	networks := strings.Join(currentContainerNetworks(ctx), " ")
 	dataMount := currentContainerDataMount(ctx)
@@ -122,9 +130,16 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 		"-e", "DP_METRICS_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.MetricsInterval, 15)),
 		"-e", "DP_SNAPSHOT_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.SnapshotInterval, 60)),
 		"-e", "DP_RELEASE_REPO=" + repo,
+		"-e", "DP_AGENT_IMAGE=" + agentImage,
+		"-e", "DP_SELF_UPDATE=" + fmt.Sprint(t.SelfUpdate),
+		"-e", "DP_SELF_UPDATE_INTERVAL_SECONDS=" + fmt.Sprint(durationSeconds(t.SelfUpdateInterval, 3600)),
 		"-e", "DP_NETWORKS=" + networks,
 		"-e", "DP_DATA_MOUNT=" + dataMount,
+		"-e", "DP_ALLOW_AGENT_UPDATE=" + fmt.Sprint(t.AllowAgentUpdate),
+		"-e", "DP_ALLOW_COMPOSE_UPDATE=" + fmt.Sprint(t.AllowComposeUpdate),
 		"-e", "DP_ALLOW_DEPLOY=" + fmt.Sprint(t.AllowDeploy),
+		"-e", "DP_ALLOW_CONTAINER_RESTART=" + fmt.Sprint(t.AllowRestart),
+		"-e", "DP_ALLOW_IMAGE_PRUNE=" + fmt.Sprint(t.AllowImagePrune),
 		helperImage,
 		"-c", dockerUpdaterScript(),
 	}
@@ -181,8 +196,14 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
   -e DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS="$DP_SNAPSHOT_INTERVAL_SECONDS" \
   -e DOCKPILOT_INSTALL_MODE=docker \
   -e DOCKPILOT_RELEASE_REPO="$DP_RELEASE_REPO" \
-  -e DOCKPILOT_AGENT_SELF_UPDATE=true \
+  -e DOCKPILOT_AGENT_IMAGE="$DP_AGENT_IMAGE" \
+  -e DOCKPILOT_AGENT_SELF_UPDATE="$DP_SELF_UPDATE" \
+  -e DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS="$DP_SELF_UPDATE_INTERVAL_SECONDS" \
+  -e DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE="$DP_ALLOW_AGENT_UPDATE" \
+  -e DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE="$DP_ALLOW_COMPOSE_UPDATE" \
   -e DOCKPILOT_AGENT_ALLOW_DEPLOY="$DP_ALLOW_DEPLOY" \
+  -e DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART="$DP_ALLOW_CONTAINER_RESTART" \
+  -e DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE="$DP_ALLOW_IMAGE_PRUNE" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt:/opt \
   -v /srv:/srv \
@@ -308,8 +329,14 @@ func (t TaskExecutor) scheduleInstallerUpdate(ctx context.Context, task protocol
 		"sleep 3",
 		"curl -fsSL " + shellArg(installScript) +
 			" | DOCKPILOT_YES=1 DOCKPILOT_REPO=" + shellArg(repo) +
-			" DOCKPILOT_AGENT_SELF_UPDATE=true" +
+			" DOCKPILOT_AGENT_IMAGE=" + shellArg(nonEmpty(t.AgentImage, defaultAgentImage)) +
+			" DOCKPILOT_AGENT_SELF_UPDATE=" + shellArg(fmt.Sprint(t.SelfUpdate)) +
+			" DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS=" + shellArg(fmt.Sprint(durationSeconds(t.SelfUpdateInterval, 3600))) +
+			" DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE=" + shellArg(fmt.Sprint(t.AllowAgentUpdate)) +
+			" DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE=" + shellArg(fmt.Sprint(t.AllowComposeUpdate)) +
 			" DOCKPILOT_AGENT_ALLOW_DEPLOY=" + shellArg(fmt.Sprint(t.AllowDeploy)) +
+			" DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART=" + shellArg(fmt.Sprint(t.AllowRestart)) +
+			" DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE=" + shellArg(fmt.Sprint(t.AllowImagePrune)) +
 			" bash -s -- " + shellArg(action) +
 			" --server-url " + shellArg(serverURL) +
 			" --registration-token " + shellArg(registrationToken) +

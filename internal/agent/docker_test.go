@@ -58,6 +58,25 @@ func TestTaskExecutorRejectsDisabledDangerousTask(t *testing.T) {
 	}
 }
 
+func TestDockerUpdaterScriptPreservesLocalPolicyEnv(t *testing.T) {
+	script := dockerUpdaterScript()
+	required := []string{
+		"DOCKPILOT_AGENT_IMAGE",
+		"DOCKPILOT_AGENT_SELF_UPDATE",
+		"DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS",
+		"DOCKPILOT_AGENT_ALLOW_AGENT_UPDATE",
+		"DOCKPILOT_AGENT_ALLOW_COMPOSE_UPDATE",
+		"DOCKPILOT_AGENT_ALLOW_DEPLOY",
+		"DOCKPILOT_AGENT_ALLOW_CONTAINER_RESTART",
+		"DOCKPILOT_AGENT_ALLOW_IMAGE_PRUNE",
+	}
+	for _, item := range required {
+		if !strings.Contains(script, item) {
+			t.Fatalf("docker updater script should preserve %s", item)
+		}
+	}
+}
+
 func TestFriendlyDetectionFailureExplains1PanelEnvIssue(t *testing.T) {
 	reason, advice := friendlyDetectionFailure("variable WEBSITE_DIR is not set and mount becomes :/www")
 	if !strings.Contains(reason, "环境变量") || !strings.Contains(advice, "1Panel") {

@@ -335,7 +335,7 @@
                 </label>
                 <label>
                   <span>Agent 版本</span>
-                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.17" />
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.18" />
                 </label>
                 <div class="install-mode">
                   <span>安装方式</span>

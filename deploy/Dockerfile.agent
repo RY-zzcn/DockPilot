@@ -8,7 +8,7 @@ COPY . .
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
-ARG VERSION=0.2.17
+ARG VERSION=0.2.18
 ARG COMMIT=dev
 ARG BUILD_DATE=unknown
 RUN --mount=type=cache,target=/root/.cache/go-build set -eux; \
