@@ -196,28 +196,34 @@
                 </div>
                 <div class="node-resource-metrics">
                   <div class="resource-mini" :class="{ muted: !row.metric }" :title="row.metric ? metricDetailTitle(row.metric, 'cpu') : '等待节点上报 CPU 数据'">
-                    <div>
+                    <div class="resource-mini-head">
                       <Cpu :size="15" />
                       <span>CPU</span>
                       <strong>{{ row.metric ? formatPercent(row.metric.cpu_percent) : '等待' }}</strong>
                     </div>
-                    <div class="meter"><span :style="{ width: row.metric ? clampPercent(row.metric.cpu_percent) + '%' : '0%' }"></span></div>
+                    <div class="meter resource-meter cpu-meter" :class="{ empty: !row.metric }">
+                      <span class="meter-fill" :style="{ width: row.metric ? clampPercent(row.metric.cpu_percent) + '%' : '0%' }"></span>
+                    </div>
                   </div>
                   <div class="resource-mini" :class="{ muted: !row.metric }" :title="row.metric ? metricDetailTitle(row.metric, 'memory') : '等待节点上报内存数据'">
-                    <div>
+                    <div class="resource-mini-head">
                       <MemoryStick :size="15" />
                       <span>内存</span>
                       <strong>{{ row.metric ? formatPercent(metricMemoryPercent(row.metric)) : '等待' }}</strong>
                     </div>
-                    <div class="meter"><span :style="{ width: row.metric ? clampPercent(metricMemoryPercent(row.metric)) + '%' : '0%' }"></span></div>
+                    <div class="meter resource-meter memory-meter" :class="{ empty: !row.metric }">
+                      <span class="meter-fill" :style="{ width: row.metric ? clampPercent(metricMemoryPercent(row.metric)) + '%' : '0%' }"></span>
+                    </div>
                   </div>
                   <div class="resource-mini" :class="{ muted: !row.metric }" :title="row.metric ? metricDetailTitle(row.metric, 'disk') : '等待节点上报硬盘数据'">
-                    <div>
+                    <div class="resource-mini-head">
                       <HardDrive :size="15" />
                       <span>磁盘</span>
                       <strong>{{ row.metric ? formatPercent(metricDiskPercent(row.metric)) : '等待' }}</strong>
                     </div>
-                    <div class="meter"><span :style="{ width: row.metric ? clampPercent(metricDiskPercent(row.metric)) + '%' : '0%' }"></span></div>
+                    <div class="meter resource-meter disk-meter" :class="{ empty: !row.metric }">
+                      <span class="meter-fill" :style="{ width: row.metric ? clampPercent(metricDiskPercent(row.metric)) + '%' : '0%' }"></span>
+                    </div>
                   </div>
                 </div>
               </button>
@@ -342,7 +348,7 @@
                 </label>
                 <label>
                   <span>Agent 版本</span>
-                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.21" />
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.22" />
                 </label>
                 <div class="install-mode">
                   <span>安装方式</span>

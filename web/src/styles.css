@@ -852,7 +852,7 @@ details.surface {
   background: var(--surface);
 }
 
-.resource-mini > div {
+.resource-mini-head {
   display: grid;
   min-width: 0;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -879,7 +879,33 @@ details.surface {
 }
 
 .resource-mini .meter {
-  height: 6px;
+  display: block;
+  height: 8px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-strong) 78%, transparent);
+}
+
+.resource-meter .meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.24s ease;
+}
+
+.cpu-meter .meter-fill {
+  background: linear-gradient(90deg, #4aa3ff, #49d3f2);
+}
+
+.memory-meter .meter-fill {
+  background: linear-gradient(90deg, #48c774, #88d36d);
+}
+
+.disk-meter .meter-fill {
+  background: linear-gradient(90deg, #f5a524, #f2c94c);
+}
+
+.resource-meter.empty .meter-fill {
+  width: 0 !important;
 }
 
 .resource-mini.muted {
