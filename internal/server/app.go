@@ -471,7 +471,7 @@ func (a *App) handleImportCompose(w http.ResponseWriter, r *http.Request) {
 		project, err = a.store.ImportComposeProjectReadOnly(body.NodeID, body.ID)
 	case "managed":
 		if !body.Confirm {
-			writeError(w, http.StatusBadRequest, "confirm is required before importing a scanned project as panel-managed")
+			writeError(w, http.StatusBadRequest, "转为托管前需要二次确认")
 			return
 		}
 		project, err = a.store.ImportComposeProjectManaged(body.NodeID, body.ID, body.Content, CurrentUser(r).Username)

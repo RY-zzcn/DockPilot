@@ -163,13 +163,16 @@ func TestImportComposeOwnershipAndContentVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert node: %v", err)
 	}
+	sourceContent := "services:\n  db:\n    environment:\n      PASSWORD: secret\n"
 	snapshot := protocol.DockerSnapshotPayload{
 		ComposeProjects: []protocol.ComposeProjectSnapshot{{
-			ID:      "compose-scanned",
-			Name:    "site",
-			Path:    "/opt/site/compose.yml",
-			Managed: false,
-			Content: "services:\n  db:\n    environment:\n      PASSWORD: secret\n",
+			ID:             "compose-scanned",
+			Name:           "site",
+			Path:           "/opt/site/compose.yml",
+			Managed:        false,
+			Content:        sourceContent,
+			ContentHash:    composeContentHash(sourceContent),
+			ContentPreview: "services:\n  db:\n    image: postgres:16\n",
 		}},
 	}
 	if err := store.ReplaceDockerSnapshot("node-1", snapshot); err != nil {
@@ -179,7 +182,7 @@ func TestImportComposeOwnershipAndContentVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get compose: %v", err)
 	}
-	if project.Ownership != "scanned" || project.Imported || project.Managed || project.Content != "" {
+	if project.Ownership != "scanned" || project.Imported || project.Managed || project.Content != "" || project.ContentHash == "" || project.ContentPreview == "" {
 		t.Fatalf("scanned project should stay redacted and read-only: %#v", project)
 	}
 	readOnly, err := store.ImportComposeProjectReadOnly("node-1", "compose-scanned")
@@ -199,12 +202,15 @@ func TestImportComposeOwnershipAndContentVisibility(t *testing.T) {
 	if readOnly.Ownership != "imported" || !readOnly.Imported || readOnly.Content != "" {
 		t.Fatalf("snapshot should preserve read-only ownership: %#v", readOnly)
 	}
-	managed, err := store.ImportComposeProjectManaged("node-1", "compose-scanned", "services:\n  web:\n    image: nginx:stable\n", "admin")
+	if _, err := store.ImportComposeProjectManaged("node-1", "compose-scanned", "services:\n  web:\n    image: nginx:stable\n", "admin"); err == nil {
+		t.Fatal("managed import with mismatched content should fail")
+	}
+	managed, err := store.ImportComposeProjectManaged("node-1", "compose-scanned", sourceContent, "admin")
 	if err != nil {
 		t.Fatalf("import managed: %v", err)
 	}
-	if managed.Ownership != "managed" || managed.Imported || !managed.Managed || !strings.Contains(managed.Content, "nginx:stable") {
-		t.Fatalf("managed import should store only pasted content: %#v", managed)
+	if managed.Ownership != "managed" || managed.Imported || !managed.Managed || managed.Content != sourceContent || managed.ContentHash != composeContentHash(sourceContent) {
+		t.Fatalf("managed import should store verified pasted content: %#v", managed)
 	}
 }
 

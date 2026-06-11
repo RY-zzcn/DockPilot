@@ -108,11 +108,13 @@ type ImageSnapshot struct {
 }
 
 type ComposeProjectSnapshot struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	Managed bool   `json:"managed"`
-	Content string `json:"content,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Path           string `json:"path"`
+	Managed        bool   `json:"managed"`
+	Content        string `json:"content,omitempty"`
+	ContentHash    string `json:"content_hash,omitempty"`
+	ContentPreview string `json:"content_preview,omitempty"`
 }
 
 type UpdateDetection struct {

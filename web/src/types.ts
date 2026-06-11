@@ -86,6 +86,8 @@ export interface ComposeProject {
   ownership: string
   imported: boolean
   content: string
+  content_hash: string
+  content_preview: string
   version: number
   update_available: boolean
   checked_at: string

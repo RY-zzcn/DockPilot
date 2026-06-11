@@ -15,7 +15,7 @@ COPY --from=web /src/web/dist ./web/dist
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
-ARG VERSION=0.2.14
+ARG VERSION=0.2.15
 ARG COMMIT=dev
 ARG BUILD_DATE=unknown
 RUN --mount=type=cache,target=/root/.cache/go-build set -eux; \

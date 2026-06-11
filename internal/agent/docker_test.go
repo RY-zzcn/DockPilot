@@ -218,12 +218,22 @@ func TestComposeProjectsFromDirsSkips1PanelResourceTemplates(t *testing.T) {
 func TestComposeProjectDoesNotExposeScannedContent(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "compose.yml")
-	if err := os.WriteFile(file, []byte("services:\n  db:\n    environment:\n      PASSWORD: secret\n"), 0o644); err != nil {
+	raw := []byte("services:\n  watch-room-server:\n    image: cyc233/watch-room-server:latest\n    container_name: watch-room-server\n    restart: unless-stopped\n    environment:\n      PASSWORD: secret\n")
+	if err := os.WriteFile(file, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	project := composeProject("app", file, false)
 	if project.Content != "" {
 		t.Fatalf("scanned compose content should be hidden, got %q", project.Content)
+	}
+	if project.ContentHash != composeFileHash(file) || project.ContentHash == "" {
+		t.Fatalf("scanned compose hash should be reported without content, got %q", project.ContentHash)
+	}
+	if !strings.Contains(project.ContentPreview, "image: cyc233/watch-room-server:latest") || !strings.Contains(project.ContentPreview, "restart: unless-stopped") {
+		t.Fatalf("scanned compose preview should include safe service fields, got %q", project.ContentPreview)
+	}
+	if strings.Contains(project.ContentPreview, "PASSWORD") || strings.Contains(project.ContentPreview, "secret") || strings.Contains(project.ContentPreview, "environment") {
+		t.Fatalf("scanned compose preview leaked sensitive fields: %q", project.ContentPreview)
 	}
 }
 

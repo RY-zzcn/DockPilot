@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,6 +112,8 @@ type ComposeProject struct {
 	Ownership         string `json:"ownership"`
 	Imported          bool   `json:"imported"`
 	Content           string `json:"content,omitempty"`
+	ContentHash       string `json:"content_hash,omitempty"`
+	ContentPreview    string `json:"content_preview,omitempty"`
 	Version           int    `json:"version"`
 	UpdateAvailable   bool   `json:"update_available"`
 	CheckedAt         string `json:"checked_at"`
@@ -308,6 +312,8 @@ CREATE TABLE IF NOT EXISTS compose_projects (
   ownership TEXT NOT NULL DEFAULT 'scanned',
   imported INTEGER NOT NULL DEFAULT 0,
   content TEXT NOT NULL DEFAULT '',
+  content_hash TEXT NOT NULL DEFAULT '',
+  content_preview TEXT NOT NULL DEFAULT '',
   version INTEGER NOT NULL DEFAULT 1,
   update_available INTEGER NOT NULL DEFAULT 0,
   checked_at TEXT NOT NULL DEFAULT '',
@@ -431,6 +437,12 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 		return err
 	}
 	if err := s.ensureColumn("compose_projects", "imported", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "content_hash", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("compose_projects", "content_preview", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("compose_projects", "update_available", "INTEGER NOT NULL DEFAULT 0"); err != nil {
@@ -803,12 +815,18 @@ VALUES(?,?,?,?,?,?,datetime('now','localtime'))`,
 			ownership = "managed"
 		}
 		_, err := tx.Exec(`
-INSERT INTO compose_projects(id, node_id, name, path, managed, ownership, imported, content, last_seen, updated_at)
-VALUES(?,?,?,?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
+INSERT INTO compose_projects(id, node_id, name, path, managed, ownership, imported, content, content_hash, content_preview, last_seen, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
 ON CONFLICT(node_id, id) DO UPDATE SET
   name = excluded.name,
   path = excluded.path,
   content = CASE WHEN compose_projects.managed = 1 THEN compose_projects.content ELSE excluded.content END,
+  content_hash = CASE WHEN excluded.content_hash != '' THEN excluded.content_hash ELSE compose_projects.content_hash END,
+  content_preview = CASE
+    WHEN excluded.content_hash != '' AND excluded.content_hash != compose_projects.content_hash THEN excluded.content_preview
+    WHEN excluded.content_preview != '' THEN excluded.content_preview
+    ELSE compose_projects.content_preview
+  END,
   managed = CASE WHEN compose_projects.managed = 1 THEN 1 ELSE excluded.managed END,
   ownership = CASE
     WHEN compose_projects.managed = 1 THEN compose_projects.ownership
@@ -817,7 +835,7 @@ ON CONFLICT(node_id, id) DO UPDATE SET
   END,
   last_seen = datetime('now','localtime'),
   updated_at = datetime('now','localtime')`,
-			project.ID, nodeID, project.Name, project.Path, boolInt(project.Managed), ownership, 0, content)
+			project.ID, nodeID, project.Name, project.Path, boolInt(project.Managed), ownership, 0, content, project.ContentHash, project.ContentPreview)
 		if err != nil {
 			return err
 		}
@@ -976,7 +994,7 @@ func (s *Store) DockerState(nodeID string) (DockerState, error) {
 	if err != nil {
 		return state, err
 	}
-	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, ownership, imported, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
+	projects, err := queryRows(s.db, `SELECT id, node_id, name, path, managed, ownership, imported, content, content_hash, content_preview, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? ORDER BY name`, scanComposeProject, nodeID)
 	if err != nil {
 		return state, err
 	}
@@ -1008,8 +1026,8 @@ func (s *Store) SaveComposeProject(nodeID, projectID, name, path, content, usern
 		}
 	}
 	_, err = tx.Exec(`
-INSERT INTO compose_projects(id, node_id, name, path, managed, ownership, imported, content, version, last_seen, updated_at)
-VALUES(?,?,?,?,1,'managed',0,?,1,datetime('now','localtime'),datetime('now','localtime'))
+INSERT INTO compose_projects(id, node_id, name, path, managed, ownership, imported, content, content_hash, content_preview, version, last_seen, updated_at)
+VALUES(?,?,?,?,1,'managed',0,?,?,?,1,datetime('now','localtime'),datetime('now','localtime'))
 ON CONFLICT(node_id, id) DO UPDATE SET
   name = excluded.name,
   path = excluded.path,
@@ -1017,9 +1035,11 @@ ON CONFLICT(node_id, id) DO UPDATE SET
   ownership = 'managed',
   imported = 0,
   content = excluded.content,
+  content_hash = excluded.content_hash,
+  content_preview = excluded.content_preview,
   version = compose_projects.version + 1,
   updated_at = datetime('now','localtime')`,
-		projectID, nodeID, name, path, content)
+		projectID, nodeID, name, path, content, composeContentHash(content), "")
 	if err != nil {
 		return ComposeProject{}, err
 	}
@@ -1049,15 +1069,25 @@ WHERE node_id = ? AND id = ? AND managed = 0`, nodeID, projectID)
 
 func (s *Store) ImportComposeProjectManaged(nodeID, projectID, content, username string) (ComposeProject, error) {
 	if strings.TrimSpace(content) == "" {
-		return ComposeProject{}, errors.New("compose content is required when importing as panel-managed")
+		return ComposeProject{}, errors.New("请粘贴 Compose 原文件的完整内容")
 	}
+	contentHash := composeContentHash(content)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return ComposeProject{}, err
 	}
 	defer tx.Rollback()
 	var oldContent string
-	_ = tx.QueryRow(`SELECT content FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).Scan(&oldContent)
+	var expectedHash string
+	if err := tx.QueryRow(`SELECT content, content_hash FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).Scan(&oldContent, &expectedHash); err != nil {
+		return ComposeProject{}, err
+	}
+	if expectedHash == "" {
+		return ComposeProject{}, errors.New("当前项目还没有源文件哈希，请等待 Agent 刷新后再转为托管")
+	}
+	if !strings.EqualFold(contentHash, expectedHash) {
+		return ComposeProject{}, errors.New("粘贴的 Compose 内容与节点原文件哈希不一致，已拒绝转为托管")
+	}
 	if oldContent != "" {
 		if _, err := tx.Exec(`INSERT INTO compose_revisions(project_id, node_id, content, created_at, created_by) VALUES(?,?,?,datetime('now','localtime'),?)`, projectID, nodeID, oldContent, username); err != nil {
 			return ComposeProject{}, err
@@ -1069,9 +1099,11 @@ SET ownership = 'managed',
     imported = 0,
     managed = 1,
     content = ?,
+    content_hash = ?,
+    content_preview = '',
     version = version + 1,
     updated_at = datetime('now','localtime')
-WHERE node_id = ? AND id = ? AND managed = 0`, content, nodeID, projectID)
+WHERE node_id = ? AND id = ? AND managed = 0`, content, contentHash, nodeID, projectID)
 	if err != nil {
 		return ComposeProject{}, err
 	}
@@ -1086,15 +1118,15 @@ WHERE node_id = ? AND id = ? AND managed = 0`, content, nodeID, projectID)
 
 func (s *Store) GetComposeProject(nodeID, projectID string) (ComposeProject, error) {
 	var project ComposeProject
-	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, ownership, imported, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
-		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, ownership, imported, content, content_hash, content_preview, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
+		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.ContentHash, &project.ContentPreview, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
 func (s *Store) GetComposeProjectByPath(nodeID, path string) (ComposeProject, error) {
 	var project ComposeProject
-	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, ownership, imported, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND path = ? ORDER BY managed DESC, updated_at DESC LIMIT 1`, nodeID, path).
-		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, ownership, imported, content, content_hash, content_preview, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND path = ? ORDER BY managed DESC, updated_at DESC LIMIT 1`, nodeID, path).
+		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.ContentHash, &project.ContentPreview, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }
 
@@ -1519,7 +1551,7 @@ func scanImage(rows *sql.Rows) (Image, error) {
 
 func scanComposeProject(rows *sql.Rows) (ComposeProject, error) {
 	var project ComposeProject
-	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	err := rows.Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Ownership, boolScanner(&project.Imported), &project.Content, &project.ContentHash, &project.ContentPreview, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	if project.Ownership == "" {
 		if project.Managed {
 			project.Ownership = "managed"
@@ -1530,6 +1562,11 @@ func scanComposeProject(rows *sql.Rows) (ComposeProject, error) {
 		}
 	}
 	return project, err
+}
+
+func composeContentHash(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }
 
 func nonEmpty(value, fallback string) string {

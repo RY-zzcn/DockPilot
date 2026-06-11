@@ -150,6 +150,24 @@
           </article>
         </div>
 
+        <section class="attention-strip" :class="{ quiet: attentionItems.length === 0 }">
+          <div class="attention-summary">
+            <AlertTriangle :size="18" />
+            <div>
+              <h2>异常与更新</h2>
+              <p>{{ attentionItems.length > 0 ? `需要处理 ${attentionItems.length} 项` : '当前状态正常' }}</p>
+            </div>
+          </div>
+          <div class="attention-actions">
+            <button v-for="item in attentionItems" :key="item.key" class="attention-pill" @click="item.action">
+              <span class="badge pending">{{ item.kind }}</span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.detail }}</small>
+            </button>
+            <p v-if="attentionItems.length === 0" class="empty-hint compact-empty">当前没有需要处理的项目。</p>
+          </div>
+        </section>
+
         <div class="dashboard-grid">
           <section class="surface span-2">
             <div class="surface-head">
@@ -168,41 +186,57 @@
                 @click="selectNode(node.id, 'nodes')"
               >
                 <span class="status-dot" :class="node.status"></span>
-                <strong>{{ node.name }}</strong>
-                <span>{{ node.os || '-' }}/{{ node.arch || '-' }}</span>
-                <span>{{ node.docker_version || 'Docker -' }}</span>
-                <em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em>
+                <div class="node-line-main">
+                  <strong>{{ node.name }}</strong>
+                  <small>{{ node.os || '-' }}/{{ node.arch || '-' }}</small>
+                </div>
+                <div class="node-line-meta">
+                  <span>{{ node.docker_version || 'Docker -' }}</span>
+                  <em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em>
+                </div>
               </button>
             </div>
           </section>
 
           <section class="surface">
             <div class="surface-head">
-              <h2>资源</h2>
-              <Activity :size="18" />
+              <h2>资源快照</h2>
+              <span class="count-chip">{{ overview.last_metric.node_id ? taskNodeName(overview.last_metric.node_id) : '暂无数据' }}</span>
             </div>
             <div class="telemetry-list">
               <div class="telemetry-line">
                 <Cpu :size="18" />
-                <span>CPU</span>
+                <div class="telemetry-text">
+                  <span>CPU</span>
+                  <small>{{ overview.last_metric.container_count }} 个容器</small>
+                </div>
                 <strong>{{ formatPercent(overview.last_metric.cpu_percent) }}</strong>
                 <div class="meter"><span :style="{ width: clampPercent(overview.last_metric.cpu_percent) + '%' }"></span></div>
               </div>
               <div class="telemetry-line">
                 <MemoryStick :size="18" />
-                <span>内存</span>
+                <div class="telemetry-text">
+                  <span>内存</span>
+                  <small>{{ formatBytes(overview.last_metric.memory_used) }} / {{ formatBytes(overview.last_metric.memory_total) }}</small>
+                </div>
                 <strong>{{ formatPercent(memoryPercent) }}</strong>
                 <div class="meter"><span :style="{ width: clampPercent(memoryPercent) + '%' }"></span></div>
               </div>
               <div class="telemetry-line">
                 <HardDrive :size="18" />
-                <span>磁盘</span>
+                <div class="telemetry-text">
+                  <span>磁盘</span>
+                  <small>{{ formatBytes(overview.last_metric.disk_used) }} / {{ formatBytes(overview.last_metric.disk_total) }}</small>
+                </div>
                 <strong>{{ formatPercent(diskPercent) }}</strong>
                 <div class="meter"><span :style="{ width: clampPercent(diskPercent) + '%' }"></span></div>
               </div>
               <div class="telemetry-line">
                 <Network :size="18" />
-                <span>网络</span>
+                <div class="telemetry-text">
+                  <span>网络</span>
+                  <small>收 {{ formatBytes(overview.last_metric.network_rx) }} / 发 {{ formatBytes(overview.last_metric.network_tx) }}</small>
+                </div>
                 <strong>{{ formatBytes(overview.last_metric.network_rx + overview.last_metric.network_tx) }}</strong>
                 <div class="meter accent"><span :style="{ width: '64%' }"></span></div>
               </div>
@@ -218,26 +252,12 @@
               </button>
             </div>
             <div class="compact-list">
-              <button v-for="task in tasks.slice(0, 7)" :key="task.id" class="task-line" @click="openTask(task)">
+              <button v-for="task in dashboardTaskItems" :key="task.id" class="task-line dashboard-task-line" @click="openTask(task)">
                 <span class="badge" :class="task.status">{{ statusText(task.status) }}</span>
                 <strong>{{ taskTitle(task.kind) }}</strong>
                 <small>{{ taskNodeName(task.node_id) }}</small>
               </button>
-            </div>
-          </section>
-
-          <section class="surface">
-            <div class="surface-head">
-              <h2>异常与更新</h2>
-              <AlertTriangle :size="18" />
-            </div>
-            <div class="compact-list">
-              <button v-for="item in attentionItems" :key="item.key" class="task-line attention-line" @click="item.action">
-                <span class="badge pending">{{ item.kind }}</span>
-                <strong>{{ item.title }}</strong>
-                <small>{{ item.detail }}</small>
-              </button>
-              <p v-if="attentionItems.length === 0" class="empty-hint">当前没有需要处理的项目。</p>
+              <p v-if="dashboardTaskItems.length === 0" class="empty-hint compact-empty">暂无任务。</p>
             </div>
           </section>
         </div>
@@ -296,6 +316,59 @@
               </button>
             </div>
           </section>
+
+          <details class="surface node-install-drawer">
+            <summary>
+              <span><Server :size="18" /> 添加节点</span>
+              <small>生成带本地能力限制的 Agent 安装命令</small>
+            </summary>
+            <div class="node-install-builder compact-builder">
+              <div class="form-grid">
+                <label>
+                  <span>节点名称</span>
+                  <input v-model="agentInstallForm.node_name" :disabled="!isAdmin" placeholder="默认使用主机名" />
+                </label>
+                <label>
+                  <span>Compose 扫描目录</span>
+                  <input v-model="agentInstallForm.compose_dirs" :disabled="!isAdmin" placeholder="/opt,/srv,/var/www" />
+                </label>
+                <label>
+                  <span>Agent 版本</span>
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.15" />
+                </label>
+                <div class="install-mode">
+                  <span>安装方式</span>
+                  <div class="segmented compact-segmented">
+                    <button type="button" :class="{ active: agentInstallForm.mode === 'docker' }" :disabled="!isAdmin" @click="agentInstallForm.mode = 'docker'">Docker</button>
+                    <button type="button" :class="{ active: agentInstallForm.mode === 'binary' }" :disabled="!isAdmin" @click="agentInstallForm.mode = 'binary'">二进制</button>
+                  </div>
+                </div>
+              </div>
+              <div class="permission-grid">
+                <label class="checkline capability-toggle">
+                  <input v-model="agentInstallForm.self_update" type="checkbox" :disabled="!isAdmin" />
+                  Agent 自更新
+                </label>
+                <label v-for="item in agentCapabilityOptions" :key="item.key" class="checkline capability-toggle">
+                  <input v-model="agentInstallForm[item.key]" type="checkbox" :disabled="!isAdmin" />
+                  {{ item.label }}
+                </label>
+              </div>
+              <div class="install-summary">
+                <span v-for="item in agentInstallSummary" :key="item" class="capability-chip enabled">{{ item }}</span>
+                <span v-if="agentInstallSummary.length === 0" class="capability-chip">仅监控与检测</span>
+              </div>
+              <div class="command-item install-command">
+                <div class="command-title">
+                  <span>{{ agentInstallForm.mode === 'docker' ? 'Agent Docker 安装命令' : 'Agent 二进制安装命令' }}</span>
+                  <button class="icon-button" title="复制" :disabled="!agentInstallCommand" @click="copyCommand(agentInstallCommand)">
+                    <Copy :size="16" />
+                  </button>
+                </div>
+                <div class="command-box">{{ agentInstallCommand || '-' }}</div>
+              </div>
+            </div>
+          </details>
 
           <div class="tabbar">
             <button :class="{ active: nodeDetailTab === 'containers' }" @click="nodeDetailTab = 'containers'">
@@ -490,10 +563,24 @@
               </div>
             </div>
             <p v-if="selectedProject && !selectedProject.managed" class="security-note">
-              扫描到的 Compose 默认只读，面板不显示文件内容，也不能直接覆盖修改。需要变更请在节点端编辑，或新建面板托管 Compose。
-              <button class="inline-link" type="button" :disabled="!isAdmin || selectedProject.imported" @click="importSelectedCompose('read_only')">导入只读</button>
-              <button class="inline-link danger-link" type="button" :disabled="!isAdmin" @click="importSelectedCompose('managed')">确认接管</button>
+              扫描到的 Compose 默认只读，面板不显示文件内容，也不能直接覆盖修改。转为托管时必须粘贴节点原文件完整内容，哈希一致才会通过。
             </p>
+            <details v-if="selectedProject && !selectedProject.managed" class="advanced-box">
+              <summary>高级操作</summary>
+              <p class="muted-line">
+                源文件 SHA256：{{ selectedProject.content_hash ? shortHash(selectedProject.content_hash) : '等待 Agent 刷新后可校验' }}
+              </p>
+              <div class="button-row">
+                <button class="secondary" type="button" :disabled="!isAdmin || selectedProject.imported" @click="importSelectedCompose('read_only')">
+                  <FileCode2 :size="16" />
+                  导入只读
+                </button>
+                <button class="secondary danger-action" type="button" :disabled="!isAdmin || !selectedProject.content_hash" @click="importSelectedCompose('managed')">
+                  <Shield :size="16" />
+                  转为托管
+                </button>
+              </div>
+            </details>
             <div v-if="selectedProject" class="project-meta">
               <span><strong>归属</strong>{{ composeOwnershipLabel(selectedProject) }}</span>
               <span><strong>状态</strong><em :class="detectionBadgeClass(selectedProject)" :title="detectionTitle(selectedProject)">{{ detectionLabel(selectedProject) }}</em></span>
@@ -511,12 +598,11 @@
                   <input v-model="composeForm.path" :disabled="!canEditCompose" />
                 </label>
               </div>
-              <textarea
-                v-model="composeForm.content"
-                :disabled="!canEditCompose"
-                :placeholder="selectedProject && !selectedProject.managed ? '扫描项目内容已隐藏。' : ''"
-                spellcheck="false"
-              ></textarea>
+              <template v-if="selectedProject && !selectedProject.managed">
+                <pre v-if="selectedProject.content_preview" class="compose-preview">{{ selectedProject.content_preview }}</pre>
+                <p v-else class="empty-hint">当前项目没有可安全展示的 Compose 预览。</p>
+              </template>
+              <textarea v-else v-model="composeForm.content" :disabled="!canEditCompose" spellcheck="false"></textarea>
               <div class="button-row">
                 <label class="checkline">
                   <input v-model="composeForm.deploy_now" type="checkbox" :disabled="!canEditCompose || !canRunTask(selectedNode, 'compose_deploy')" />
@@ -586,9 +672,13 @@
         <section class="surface">
           <div class="surface-head">
             <h2>Compose 更新</h2>
-            <button class="secondary" :disabled="!isAdmin || !canRunTask(selectedNode, 'detect_updates')" @click="createNodeTask('detect_updates')">
+            <button
+              class="secondary"
+              :disabled="!isAdmin || (selectedNodeId ? !canRunTask(selectedNode, 'detect_updates') : onlineNodes.length === 0)"
+              @click="selectedNodeId ? createNodeTask('detect_updates') : detectAllNodes()"
+            >
               <Search :size="18" />
-              检测当前节点
+              {{ selectedNodeId ? '检测当前节点' : '全部检测' }}
             </button>
           </div>
           <div class="update-list">
@@ -698,13 +788,17 @@
             </div>
           </div>
           <div class="task-toolbar">
-            <div class="segmented task-filter">
+            <div class="segmented task-view-switch">
+              <button :class="{ active: taskView === 'current' }" @click="taskView = 'current'">当前</button>
+              <button :class="{ active: taskView === 'history' }" @click="taskView = 'history'">历史</button>
+            </div>
+            <div v-if="taskView === 'history'" class="segmented task-status-filter">
               <button :class="{ active: taskFilter === 'all' }" @click="taskFilter = 'all'">全部</button>
-              <button :class="{ active: taskFilter === 'active' }" @click="taskFilter = 'active'">运行中</button>
               <button :class="{ active: taskFilter === 'failed' }" @click="taskFilter = 'failed'">失败</button>
             </div>
             <div class="task-counts">
               <span>{{ activeTasks.length }} 运行</span>
+              <span>{{ historyTasks.length }} 历史</span>
               <span>{{ failedTasks.length }} 失败</span>
             </div>
           </div>
@@ -730,6 +824,7 @@
                 </div>
               </div>
             </button>
+            <p v-if="visibleTasks.length === 0" class="empty-hint">{{ taskView === 'current' ? '当前没有运行中的任务。' : '当前筛选没有历史任务。' }}</p>
           </div>
         </section>
 
@@ -749,14 +844,17 @@
               </button>
             </div>
           </div>
-          <div class="task-meta" v-if="selectedTask">
-            <span><strong>ID</strong>{{ selectedTask.id }}</span>
-            <span><strong>节点</strong>{{ taskNodeName(selectedTask.node_id) }}</span>
-            <span><strong>状态</strong><em class="badge" :class="selectedTask.status">{{ statusText(selectedTask.status) }}</em></span>
-            <span><strong>结果</strong>{{ taskMessage(selectedTask) || '-' }}</span>
-          </div>
-          <pre v-if="!taskLogsCollapsed" class="logs">{{ selectedTaskLogs }}</pre>
-          <p v-else class="empty-hint">日志已折叠。</p>
+          <template v-if="selectedTask">
+            <div class="task-meta">
+              <span><strong>ID</strong>{{ selectedTask.id }}</span>
+              <span><strong>节点</strong>{{ taskNodeName(selectedTask.node_id) }}</span>
+              <span><strong>状态</strong><em class="badge" :class="selectedTask.status">{{ statusText(selectedTask.status) }}</em></span>
+              <span><strong>结果</strong>{{ taskMessage(selectedTask) || '-' }}</span>
+            </div>
+            <pre v-if="!taskLogsCollapsed" class="logs">{{ selectedTaskLogs }}</pre>
+            <p v-else class="empty-hint">日志已折叠。</p>
+          </template>
+          <p v-else class="empty-hint detail-empty">选择左侧任务查看详情。</p>
         </section>
       </section>
 
@@ -808,59 +906,6 @@
                 保存
               </button>
             </form>
-          </div>
-        </section>
-
-        <section class="surface">
-          <div class="surface-head">
-            <h2>添加节点</h2>
-            <Server :size="18" />
-          </div>
-          <div class="node-install-builder">
-            <div class="form-grid">
-              <label>
-                <span>节点名称</span>
-                <input v-model="agentInstallForm.node_name" :disabled="!isAdmin" placeholder="默认使用主机名" />
-              </label>
-              <label>
-                <span>Compose 扫描目录</span>
-                <input v-model="agentInstallForm.compose_dirs" :disabled="!isAdmin" placeholder="/opt,/srv,/var/www" />
-              </label>
-              <label>
-                <span>Agent 版本</span>
-                <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.14" />
-              </label>
-              <div class="install-mode">
-                <span>安装方式</span>
-                <div class="segmented compact-segmented">
-                  <button type="button" :class="{ active: agentInstallForm.mode === 'docker' }" :disabled="!isAdmin" @click="agentInstallForm.mode = 'docker'">Docker</button>
-                  <button type="button" :class="{ active: agentInstallForm.mode === 'binary' }" :disabled="!isAdmin" @click="agentInstallForm.mode = 'binary'">二进制</button>
-                </div>
-              </div>
-            </div>
-            <div class="permission-grid">
-              <label class="checkline capability-toggle">
-                <input v-model="agentInstallForm.self_update" type="checkbox" :disabled="!isAdmin" />
-                Agent 自更新
-              </label>
-              <label v-for="item in agentCapabilityOptions" :key="item.key" class="checkline capability-toggle">
-                <input v-model="agentInstallForm[item.key]" type="checkbox" :disabled="!isAdmin" />
-                {{ item.label }}
-              </label>
-            </div>
-            <div class="install-summary">
-              <span v-for="item in agentInstallSummary" :key="item" class="capability-chip enabled">{{ item }}</span>
-              <span v-if="agentInstallSummary.length === 0" class="capability-chip">仅监控与检测</span>
-            </div>
-            <div class="command-item install-command">
-              <div class="command-title">
-                <span>{{ agentInstallForm.mode === 'docker' ? 'Agent Docker 安装命令' : 'Agent 二进制安装命令' }}</span>
-                <button class="icon-button" title="复制" :disabled="!agentInstallCommand" @click="copyCommand(agentInstallCommand)">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ agentInstallCommand || '-' }}</div>
-            </div>
           </div>
         </section>
 
@@ -977,7 +1022,6 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
-  Activity,
   AlertTriangle,
   Bell,
   Box,
@@ -1034,6 +1078,7 @@ type ToastType = 'info' | 'success' | 'error'
 type NodeDetailTab = 'containers' | 'images' | 'compose' | 'profile'
 type ContainerFilter = 'all' | 'running' | 'stopped' | 'updates'
 type ProjectFilter = 'all' | 'updates' | 'failed' | 'current'
+type TaskView = 'current' | 'history'
 type CommandCategory = 'quick' | 'agent' | 'server' | 'remove'
 type AgentInstallMode = 'docker' | 'binary'
 type AgentCapabilityKey =
@@ -1082,7 +1127,8 @@ const selectedNodeId = ref('')
 const selectedProjectId = ref('')
 const selectedTask = ref<Task | null>(null)
 const taskLogs = ref<TaskLog[]>([])
-const taskFilter = ref<'all' | 'active' | 'failed'>('all')
+const taskView = ref<TaskView>('current')
+const taskFilter = ref<'all' | 'failed'>('all')
 const taskLogSearch = ref('')
 const taskLogsCollapsed = ref(false)
 const nodeDetailTab = ref<NodeDetailTab>('containers')
@@ -1124,6 +1170,7 @@ const overview = reactive<Overview>({
 })
 const nodes = ref<Node[]>([])
 const dockerState = reactive<DockerState>({ containers: [], images: [], compose_projects: [] })
+const dashboardDockerState = reactive<DockerState>({ containers: [], images: [], compose_projects: [] })
 const tasks = ref<Task[]>([])
 const updateRecords = ref<UpdateRecord[]>([])
 const policies = ref<Policy[]>([])
@@ -1200,7 +1247,11 @@ const policyDrafts = reactive<Record<string, Policy>>({})
 
 const isAdmin = computed(() => user.value?.role === 'admin')
 const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value))
-const selectedProject = computed(() => dockerState.compose_projects.find((project) => project.id === selectedProjectId.value))
+const selectedProject = computed(
+  () =>
+    dockerState.compose_projects.find((project) => project.id === selectedProjectId.value) ||
+    dashboardDockerState.compose_projects.find((project) => project.id === selectedProjectId.value)
+)
 const canEditCompose = computed(() => isAdmin.value && (!selectedProject.value || selectedProject.value.managed))
 const onlineNodes = computed(() => nodes.value.filter((node) => node.status === 'online'))
 const activeTasks = computed(() => tasks.value.filter((task) => task.status === 'pending' || task.status === 'running'))
@@ -1280,7 +1331,7 @@ const filteredContainers = computed(() => {
 })
 const filteredProjects = computed(() => {
   const keyword = projectSearch.value.trim().toLowerCase()
-  return dockerState.compose_projects.filter((project) => {
+  return projectSource.value.compose_projects.filter((project) => {
     const statusMatch =
       projectFilter.value === 'all' ||
       (projectFilter.value === 'updates' && project.update_available) ||
@@ -1293,47 +1344,78 @@ const filteredProjects = computed(() => {
       .some((value) => value.toLowerCase().includes(keyword))
   })
 })
-const updateProjects = computed(() => dockerState.compose_projects.filter((project) => project.update_available))
+const projectSource = computed(() => (selectedNodeId.value ? dockerState : dashboardDockerState))
+const updateProjects = computed(() => projectSource.value.compose_projects.filter((project) => project.update_available))
 const failedProjects = computed(() =>
-  dockerState.compose_projects.filter((project) => project.detection_status === 'failed' || project.detection_status === 'partial')
+  projectSource.value.compose_projects.filter((project) => project.detection_status === 'failed' || project.detection_status === 'partial')
 )
-const attentionItems = computed(() => [
-  ...failedProjects.value.slice(0, 3).map((project) => ({
-    key: `project:${project.id}`,
-    title: project.name,
-    detail: detectionReason(project) || project.detection_error || detectionLabel(project),
-    kind: '项目',
-    action: () => openProject(project)
-  })),
-  ...updateProjects.value.slice(0, 3).map((project) => ({
-    key: `update:${project.id}`,
-    title: project.name,
-    detail: `${detectionLabel(project)} · ${project.path}`,
-    kind: '更新',
-    action: () => openProject(project)
-  })),
-  ...failedTasks.value.slice(0, 3).map((task) => ({
-    key: `task:${task.id}`,
-    title: taskTitle(task.kind),
-    detail: taskMessage(task) || task.id,
-    kind: '任务',
-    action: () => openTask(task)
-  }))
-])
+const attentionItems = computed(() => {
+  const items = [
+    ...failedProjects.value.slice(0, 3).map((project) => ({
+      key: `project:${project.id}`,
+      title: project.name,
+      detail: detectionReason(project) || project.detection_error || detectionLabel(project),
+      kind: '项目',
+      action: () => openProject(project)
+    })),
+    ...updateProjects.value.slice(0, 3).map((project) => ({
+      key: `update:${project.id}`,
+      title: project.name,
+      detail: `${detectionLabel(project)} · ${project.path}`,
+      kind: '更新',
+      action: () => openProject(project)
+    })),
+    ...failedTasks.value.slice(0, 3).map((task) => ({
+      key: `task:${task.id}`,
+      title: taskTitle(task.kind),
+      detail: taskMessage(task) || task.id,
+      kind: '任务',
+      action: () => openTask(task)
+    }))
+  ]
+  if (items.length === 0 && overview.updates_available > 0) {
+    items.push({
+      key: 'overview-updates',
+      title: `${overview.updates_available} 个项目可更新`,
+      detail: '打开更新页查看',
+      kind: '更新',
+      action: () => (activeView.value = 'updates')
+    })
+  }
+  if (items.length === 0 && overview.failed_tasks > 0) {
+    items.push({
+      key: 'overview-failed-tasks',
+      title: `${overview.failed_tasks} 个失败任务`,
+      detail: '打开任务页查看',
+      kind: '任务',
+      action: () => (activeView.value = 'tasks')
+    })
+  }
+  return items
+})
 const composePolicyRows = computed(() =>
-  dockerState.compose_projects.map((project) => ({
+  projectSource.value.compose_projects.map((project) => ({
     project,
     policy: policyDraftFor('compose', project.id)
   }))
 )
+const dashboardTaskItems = computed(() => {
+  const seen = new Set<string>()
+  return [...activeTasks.value, ...tasks.value].filter((task) => {
+    if (seen.has(task.id)) return false
+    seen.add(task.id)
+    return true
+  }).slice(0, 4)
+})
+const historyTasks = computed(() => tasks.value.filter((task) => task.status !== 'pending' && task.status !== 'running'))
 const visibleTasks = computed(() => {
-  if (taskFilter.value === 'failed') {
-    return failedTasks.value
-  }
-  if (taskFilter.value === 'active') {
+  if (taskView.value === 'current') {
     return activeTasks.value
   }
-  return tasks.value
+  if (taskFilter.value === 'failed') {
+    return historyTasks.value.filter((task) => task.status === 'failed')
+  }
+  return historyTasks.value
 })
 const selectedTaskLogs = computed(() => {
   if (!selectedTask.value) {
@@ -1666,10 +1748,11 @@ async function doRefreshAll() {
       Object.assign(runtimeSettings, versionData.settings)
     }
     syncPolicyDrafts()
-    if (!selectedNodeId.value && nodes.value.length > 0) {
-      selectedNodeId.value = nodes.value[0].id
-    } else if (selectedNodeId.value) {
+    await loadDashboardDocker(nodes.value)
+    if (selectedNodeId.value && nodes.value.some((node) => node.id === selectedNodeId.value)) {
       await loadDocker(selectedNodeId.value)
+    } else if (selectedNodeId.value) {
+      selectedNodeId.value = ''
     }
     if (isAdmin.value) {
       await loadAdminSettings()
@@ -1685,6 +1768,26 @@ async function loadAdminSettings() {
   Object.assign(installInfo, install)
   Object.assign(runtimeSettings, settings)
   users.value = userList
+}
+
+async function loadDashboardDocker(nodeList = nodes.value) {
+  const targets = nodeList.filter((node) => node.status === 'online')
+  if (targets.length === 0) {
+    dashboardDockerState.containers = []
+    dashboardDockerState.images = []
+    dashboardDockerState.compose_projects = []
+    return
+  }
+  const results = await Promise.allSettled(targets.map((node) => api.dockerState(node.id)))
+  dashboardDockerState.containers = []
+  dashboardDockerState.images = []
+  dashboardDockerState.compose_projects = []
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue
+    dashboardDockerState.containers.push(...result.value.containers)
+    dashboardDockerState.images.push(...result.value.images)
+    dashboardDockerState.compose_projects.push(...result.value.compose_projects)
+  }
 }
 
 async function loadDocker(nodeId: string) {
@@ -1891,6 +1994,9 @@ function openProject(project: ComposeProject) {
 }
 
 function selectCompose(project: ComposeProject) {
+  if (project.node_id && selectedNodeId.value !== project.node_id) {
+    selectedNodeId.value = project.node_id
+  }
   selectedProjectId.value = project.id
   editCompose(project)
 }
@@ -1942,14 +2048,19 @@ async function saveCompose() {
 async function importSelectedCompose(mode: 'read_only' | 'managed') {
   if (!selectedProject.value) return
   if (mode === 'managed') {
-    const content = window.prompt('粘贴要由面板托管保存的 Compose 内容。此操作不会读取节点上的原文件。')
+    if (!selectedProject.value.content_hash) {
+      notify('当前项目还没有源文件哈希，等待 Agent 刷新后再转为托管。', 'error')
+      return
+    }
+    const content = window.prompt('粘贴节点上这个 Compose 原文件的完整内容。只有 SHA256 与扫描到的源文件一致时，才会转为面板托管。')
     if (!content || !content.trim()) return
-    const confirmed = window.confirm('确认把这个扫描项目接管为面板托管？后续保存/部署可能覆盖节点上的 Compose 文件。')
+    const confirmed = window.confirm('确认转为面板托管？转为托管后，后续保存/部署可能覆盖节点上的 Compose 文件。')
     if (!confirmed) return
-    const saved = await runAction(`import-compose:${selectedProject.value.id}:managed`, '正在导入为面板托管', '已导入为面板托管', () =>
+    const saved = await runAction(`import-compose:${selectedProject.value.id}:managed`, '正在校验并转为托管', '已转为面板托管', () =>
       api.importCompose({ node_id: selectedProject.value!.node_id, id: selectedProject.value!.id, mode, content, confirm: true })
     )
     if (!saved) return
+    selectedNodeId.value = saved.node_id
     selectedProjectId.value = saved.id
     await loadDocker(saved.node_id)
     return
@@ -1958,6 +2069,7 @@ async function importSelectedCompose(mode: 'read_only' | 'managed') {
     api.importCompose({ node_id: selectedProject.value!.node_id, id: selectedProject.value!.id, mode })
   )
   if (!saved) return
+  selectedNodeId.value = saved.node_id
   selectedProjectId.value = saved.id
   await loadDocker(saved.node_id)
 }
@@ -2171,6 +2283,11 @@ function shortTaskId(id: string) {
   return id.length > 18 ? `${id.slice(0, 10)}...${id.slice(-6)}` : id
 }
 
+function shortHash(value: string) {
+  if (!value) return '-'
+  return value.length > 16 ? `${value.slice(0, 12)}...${value.slice(-8)}` : value
+}
+
 function statusText(status: string) {
   const labels: Record<string, string> = {
     pending: '等待',
@@ -2194,7 +2311,7 @@ function agentCanUpdate(node?: Node) {
 
 function agentVersionLabel(node: Node) {
   if (node.status !== 'online') return '离线'
-  if (!canRunTask(node, 'agent_update')) return '本地自管'
+  if (!canRunTask(node, 'agent_update')) return '禁止面板升级'
   const latest = latestReleaseVersion.value
   if (!node.version) return latest ? `可升级到 v${latest}` : '版本未知'
   if (!latest) return `Agent v${node.version}`

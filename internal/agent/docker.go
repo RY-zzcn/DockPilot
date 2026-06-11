@@ -3,16 +3,20 @@ package agent
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/dockpilot/dockpilot/internal/protocol"
+	"gopkg.in/yaml.v3"
 )
 
 type DockerClient struct {
@@ -248,21 +252,136 @@ func composeProjectNameFromPath(path string) string {
 
 func composeProject(name, path string, managed bool) protocol.ComposeProjectSnapshot {
 	content := ""
+	contentHash := composeFileHash(path)
+	contentPreview := composeContentPreview(path)
 	if !managed {
 		// Scanned host projects often contain secrets in environment blocks.
-		return protocol.ComposeProjectSnapshot{ID: stableID(path), Name: name, Path: path, Managed: managed}
+		return protocol.ComposeProjectSnapshot{ID: stableID(path), Name: name, Path: path, Managed: managed, ContentHash: contentHash, ContentPreview: contentPreview}
 	}
 	if info, err := os.Stat(path); err == nil && info.Size() < 256*1024 {
 		raw, _ := os.ReadFile(path)
 		content = string(raw)
 	}
 	return protocol.ComposeProjectSnapshot{
-		ID:      stableID(path),
-		Name:    name,
-		Path:    path,
-		Managed: managed,
-		Content: content,
+		ID:             stableID(path),
+		Name:           name,
+		Path:           path,
+		Managed:        managed,
+		Content:        content,
+		ContentHash:    contentHash,
+		ContentPreview: contentPreview,
 	}
+}
+
+func composeFileHash(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, file); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+func composeContentPreview(path string) string {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() > 256*1024 {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return ""
+	}
+	doc := &root
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		doc = root.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		return ""
+	}
+	services := mappingValue(doc, "services")
+	if services == nil || services.Kind != yaml.MappingNode {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("services:\n")
+	wroteService := false
+	for i := 0; i+1 < len(services.Content); i += 2 {
+		name := services.Content[i].Value
+		service := services.Content[i+1]
+		if service.Kind != yaml.MappingNode {
+			continue
+		}
+		fields := safeComposeServiceFields(service)
+		if len(fields) == 0 {
+			continue
+		}
+		wroteService = true
+		b.WriteString("  ")
+		b.WriteString(formatPreviewScalar(name))
+		b.WriteString(":\n")
+		for _, field := range fields {
+			b.WriteString("    ")
+			b.WriteString(field.name)
+			b.WriteString(": ")
+			b.WriteString(formatPreviewScalar(field.value))
+			b.WriteByte('\n')
+		}
+	}
+	if !wroteService {
+		return ""
+	}
+	return b.String()
+}
+
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
+
+func safeComposeServiceFields(service *yaml.Node) []struct{ name, value string } {
+	allowed := []string{"image", "container_name", "restart"}
+	fields := []struct{ name, value string }{}
+	for _, key := range allowed {
+		value := mappingValue(service, key)
+		if value == nil || value.Kind != yaml.ScalarNode || strings.TrimSpace(value.Value) == "" {
+			continue
+		}
+		fields = append(fields, struct{ name, value string }{name: key, value: value.Value})
+	}
+	return fields
+}
+
+func formatPreviewScalar(value string) string {
+	if value == "" {
+		return `""`
+	}
+	for _, ch := range value {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			continue
+		}
+		switch ch {
+		case '_', '-', '.', '/', ':', '@', '+':
+			continue
+		default:
+			return strconv.Quote(value)
+		}
+	}
+	return value
 }
 
 func commandOutput(ctx context.Context, name string, args ...string) string {
