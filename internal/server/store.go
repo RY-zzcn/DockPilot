@@ -23,8 +23,9 @@ const (
 	PolicyScheduled = "scheduled"
 	PolicyAutomatic = "automatic"
 
-	DefaultPolicyMode     = PolicyScheduled
-	DefaultPolicySchedule = "interval:1h"
+	DefaultPolicyMode        = PolicyManual
+	DefaultPolicySchedule    = "interval:1h"
+	DefaultDetectionSchedule = "interval:1h"
 
 	TaskPending  = "pending"
 	TaskRunning  = "running"
@@ -138,6 +139,19 @@ type TaskLog struct {
 	TaskID    string `json:"task_id"`
 	Line      string `json:"line"`
 	CreatedAt string `json:"created_at"`
+}
+
+type UpdateRecord struct {
+	ID              int64  `json:"id"`
+	NodeID          string `json:"node_id"`
+	TaskID          string `json:"task_id"`
+	TargetType      string `json:"target_type"`
+	TargetID        string `json:"target_id"`
+	Name            string `json:"name"`
+	PreviousVersion string `json:"previous_version,omitempty"`
+	CurrentVersion  string `json:"current_version,omitempty"`
+	Changed         bool   `json:"changed"`
+	CreatedAt       string `json:"created_at"`
 }
 
 type Policy struct {
@@ -332,6 +346,21 @@ CREATE TABLE IF NOT EXISTS task_logs (
   FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS update_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  node_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  target_type TEXT NOT NULL DEFAULT '',
+  target_id TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  previous_version TEXT NOT NULL DEFAULT '',
+  current_version TEXT NOT NULL DEFAULT '',
+  changed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE,
+  FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS policies (
   id TEXT PRIMARY KEY,
   scope TEXT NOT NULL,
@@ -371,6 +400,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 CREATE INDEX IF NOT EXISTS idx_metrics_node_recorded ON node_metrics(node_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_node_created ON tasks(node_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_update_records_created ON update_records(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 `
 	if _, err := s.db.Exec(schema); err != nil {
@@ -1028,6 +1058,48 @@ func (s *Store) FinishTask(id, status, result string) error {
 	return err
 }
 
+func (s *Store) InsertUpdateRecords(task Task, changes []protocol.ImageChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, change := range changes {
+		targetType := nonEmpty(change.TargetType, task.TargetType)
+		targetID := nonEmpty(change.TargetID, task.TargetID)
+		if _, err := tx.Exec(`
+INSERT INTO update_records(node_id, task_id, target_type, target_id, name, previous_version, current_version, changed, created_at)
+VALUES(?,?,?,?,?,?,?,?,datetime('now','localtime'))`,
+			task.NodeID, task.ID, targetType, targetID, change.Name, change.PreviousVersion, change.CurrentVersion, boolInt(change.Changed)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListUpdateRecords(limit int) ([]UpdateRecord, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT id, node_id, task_id, target_type, target_id, name, previous_version, current_version, changed, created_at FROM update_records ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records := []UpdateRecord{}
+	for rows.Next() {
+		var record UpdateRecord
+		if err := rows.Scan(&record.ID, &record.NodeID, &record.TaskID, &record.TargetType, &record.TargetID, &record.Name, &record.PreviousVersion, &record.CurrentVersion, boolScanner(&record.Changed), &record.CreatedAt); err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, rows.Err()
+}
+
 func (s *Store) AddTaskLog(taskID, line string) error {
 	_, err := s.db.Exec(`INSERT INTO task_logs(task_id, line, created_at) VALUES(?,?,datetime('now','localtime'))`, taskID, line)
 	return err
@@ -1065,6 +1137,42 @@ func (s *Store) ClearTasks(scope string) (int64, error) {
 	return deleted, nil
 }
 
+func (s *Store) PruneTaskHistory() error {
+	const (
+		retentionDays    = 14
+		maxFinishedTasks = 600
+		maxTaskLogs      = 12000
+		maxUpdateRecords = 2000
+	)
+	terminal := `status IN ('success','failed','canceled')`
+	if _, err := s.db.Exec(`DELETE FROM tasks WHERE ` + terminal + ` AND created_at < datetime('now','localtime','-` + fmt.Sprint(retentionDays) + ` days')`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM tasks WHERE id IN (
+SELECT id FROM tasks WHERE `+terminal+` ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?
+)`, maxFinishedTasks); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM task_logs WHERE task_id NOT IN (SELECT id FROM tasks)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM task_logs WHERE id IN (
+SELECT id FROM task_logs ORDER BY id DESC LIMIT -1 OFFSET ?
+)`, maxTaskLogs); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM update_records WHERE task_id NOT IN (SELECT id FROM tasks)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM update_records WHERE id IN (
+SELECT id FROM update_records ORDER BY id DESC LIMIT -1 OFFSET ?
+)`, maxUpdateRecords); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM events WHERE created_at < datetime('now','localtime','-30 days')`)
+	return err
+}
+
 func (s *Store) ListPolicies() ([]Policy, error) {
 	rows, err := s.db.Query(`SELECT id, scope, scope_id, mode, schedule, exclude_patterns, enabled, updated_at FROM policies ORDER BY scope, scope_id`)
 	if err != nil {
@@ -1096,7 +1204,7 @@ func (s *Store) UpsertPolicy(policy Policy) (Policy, error) {
 	if policy.Mode == "" {
 		policy.Mode = DefaultPolicyMode
 	}
-	if policy.Schedule == "" && policy.Mode != PolicyManual {
+	if policy.Schedule == "" {
 		policy.Schedule = DefaultPolicySchedule
 	}
 	_, err := s.db.Exec(`

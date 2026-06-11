@@ -158,7 +158,17 @@ type TaskResultPayload struct {
 	Message      string            `json:"message,omitempty"`
 	ExitCode     int               `json:"exit_code"`
 	Updates      []UpdateDetection `json:"updates,omitempty"`
+	ImageChanges []ImageChange     `json:"image_changes,omitempty"`
 	RestartAgent bool              `json:"restart_agent,omitempty"`
+}
+
+type ImageChange struct {
+	TargetType      string `json:"target_type,omitempty"`
+	TargetID        string `json:"target_id,omitempty"`
+	Name            string `json:"name"`
+	PreviousVersion string `json:"previous_version,omitempty"`
+	CurrentVersion  string `json:"current_version,omitempty"`
+	Changed         bool   `json:"changed"`
 }
 
 type ErrorPayload struct {

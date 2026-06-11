@@ -25,10 +25,9 @@ const (
 )
 
 func (t TaskExecutor) agentUpdate(ctx context.Context, task protocol.TaskPayload, logLine func(string)) (bool, error) {
-	repo := nonEmpty(task.Args["repo"], t.ReleaseRepo)
-	repo = nonEmpty(repo, "RY-zzcn/DockPilot")
+	repo := nonEmpty(t.ReleaseRepo, "RY-zzcn/DockPilot")
 	targetVersion := nonEmpty(task.Args["version"], "latest")
-	installMode := strings.ToLower(nonEmpty(task.Args["install_mode"], t.InstallMode))
+	installMode := strings.ToLower(t.InstallMode)
 	if installMode == "" {
 		installMode = detectInstallMode()
 	}
@@ -89,10 +88,10 @@ func (t TaskExecutor) updateBinaryAgent(ctx context.Context, repo, targetVersion
 }
 
 func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protocol.TaskPayload, repo, targetVersion string, logLine func(string)) error {
-	serverURL := nonEmpty(t.ServerURL, task.Args["server_url"])
-	registrationToken := nonEmpty(task.Args["registration_token"], t.RegistrationToken)
-	nodeName := nonEmpty(task.Args["node_name"], t.NodeName)
-	agentImage := nonEmpty(task.Args["agent_image"], t.AgentImage)
+	serverURL := t.ServerURL
+	registrationToken := t.RegistrationToken
+	nodeName := t.NodeName
+	agentImage := t.AgentImage
 	agentImage = nonEmpty(agentImage, defaultAgentImage)
 	if serverURL == "" {
 		return fmt.Errorf("server_url is required for docker agent update")
@@ -125,6 +124,7 @@ func (t TaskExecutor) scheduleDockerAgentUpdate(ctx context.Context, task protoc
 		"-e", "DP_RELEASE_REPO=" + repo,
 		"-e", "DP_NETWORKS=" + networks,
 		"-e", "DP_DATA_MOUNT=" + dataMount,
+		"-e", "DP_ALLOW_DEPLOY=" + fmt.Sprint(t.AllowDeploy),
 		helperImage,
 		"-c", dockerUpdaterScript(),
 	}
@@ -181,6 +181,8 @@ docker run -d --name dockpilot-agent --restart unless-stopped \
   -e DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS="$DP_SNAPSHOT_INTERVAL_SECONDS" \
   -e DOCKPILOT_INSTALL_MODE=docker \
   -e DOCKPILOT_RELEASE_REPO="$DP_RELEASE_REPO" \
+  -e DOCKPILOT_AGENT_SELF_UPDATE=true \
+  -e DOCKPILOT_AGENT_ALLOW_DEPLOY="$DP_ALLOW_DEPLOY" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /opt:/opt \
   -v /srv:/srv \
@@ -292,10 +294,10 @@ func durationSeconds(value time.Duration, fallback int) int {
 }
 
 func (t TaskExecutor) scheduleInstallerUpdate(ctx context.Context, task protocol.TaskPayload, repo, targetVersion, action string, logLine func(string)) error {
-	serverURL := nonEmpty(task.Args["server_url"], t.ServerURL)
-	registrationToken := nonEmpty(task.Args["registration_token"], t.RegistrationToken)
-	nodeName := nonEmpty(task.Args["node_name"], t.NodeName)
-	installScript := nonEmpty(task.Args["install_script"], defaultInstallScript)
+	serverURL := t.ServerURL
+	registrationToken := t.RegistrationToken
+	nodeName := t.NodeName
+	installScript := defaultInstallScript
 	if serverURL == "" {
 		return fmt.Errorf("server_url is required for installer update")
 	}
@@ -306,10 +308,13 @@ func (t TaskExecutor) scheduleInstallerUpdate(ctx context.Context, task protocol
 		"sleep 3",
 		"curl -fsSL " + shellArg(installScript) +
 			" | DOCKPILOT_YES=1 DOCKPILOT_REPO=" + shellArg(repo) +
+			" DOCKPILOT_AGENT_SELF_UPDATE=true" +
+			" DOCKPILOT_AGENT_ALLOW_DEPLOY=" + shellArg(fmt.Sprint(t.AllowDeploy)) +
 			" bash -s -- " + shellArg(action) +
 			" --server-url " + shellArg(serverURL) +
 			" --registration-token " + shellArg(registrationToken) +
-			" --node-name " + shellArg(nodeName),
+			" --node-name " + shellArg(nodeName) +
+			" --compose-dirs " + shellArg(strings.Join(t.ComposeDirs, ",")),
 	}
 	if targetVersion != "" && targetVersion != "latest" {
 		args[1] += " --version " + shellArg(version.EnsureVPrefix(targetVersion))

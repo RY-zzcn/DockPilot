@@ -48,13 +48,13 @@ func TestEffectivePolicyPriority(t *testing.T) {
 	}
 }
 
-func TestDefaultPolicySchedulesUpdateDetection(t *testing.T) {
+func TestDefaultPolicyDisablesAutomaticUpdateOnly(t *testing.T) {
 	store := testStore(t)
 	policy, err := store.ResolvePolicy("global", "")
 	if err != nil {
 		t.Fatalf("resolve default policy: %v", err)
 	}
-	if policy.Mode != PolicyScheduled || policy.Schedule != DefaultPolicySchedule || !policy.Enabled {
+	if policy.Mode != PolicyManual || policy.Schedule != DefaultPolicySchedule || !policy.Enabled {
 		t.Fatalf("unexpected default policy: %#v", policy)
 	}
 
@@ -62,7 +62,7 @@ func TestDefaultPolicySchedulesUpdateDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert defaulted policy: %v", err)
 	}
-	if saved.Mode != PolicyScheduled || saved.Schedule != DefaultPolicySchedule {
+	if saved.Mode != PolicyManual || saved.Schedule != DefaultPolicySchedule {
 		t.Fatalf("policy defaults were not applied: %#v", saved)
 	}
 }
@@ -95,6 +95,36 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 	if len(logs) != 1 || logs[0].Line != "hello" {
 		t.Fatalf("unexpected logs: %#v", logs)
+	}
+}
+
+func TestUpdateRecords(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	task, err := store.CreateTask(Task{NodeID: "node-1", Kind: "compose_update", TargetType: "compose", TargetID: "compose-1"})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	err = store.InsertUpdateRecords(task, []protocol.ImageChange{{
+		TargetType:      "compose",
+		TargetID:        "compose-1",
+		Name:            "web",
+		PreviousVersion: "sha256:old",
+		CurrentVersion:  "sha256:new",
+		Changed:         true,
+	}})
+	if err != nil {
+		t.Fatalf("insert update records: %v", err)
+	}
+	records, err := store.ListUpdateRecords(10)
+	if err != nil {
+		t.Fatalf("list update records: %v", err)
+	}
+	if len(records) != 1 || records[0].Name != "web" || !records[0].Changed {
+		t.Fatalf("unexpected update records: %#v", records)
 	}
 }
 

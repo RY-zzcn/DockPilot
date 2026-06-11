@@ -111,6 +111,7 @@ func (c *Client) connectOnce(ctx context.Context) error {
 	stop := make(chan struct{})
 	defer close(stop)
 	go c.reportLoop(ctx, stop, send)
+	go c.selfUpdateLoop(ctx, stop)
 	for {
 		if err := conn.ReadJSON(&incoming); err != nil {
 			return err
@@ -195,6 +196,7 @@ func (c *Client) handleTask(ctx context.Context, task protocol.TaskPayload, send
 		InstallMode:       c.cfg.InstallMode,
 		ReleaseRepo:       c.cfg.ReleaseRepo,
 		AgentImage:        c.cfg.AgentImage,
+		AllowDeploy:       c.cfg.AllowDeploy,
 	}
 	logLine := func(line string) {
 		msg, _ := protocol.NewMessage(protocol.TypeTaskLog, c.cfg.NodeID, protocol.TaskLogPayload{
@@ -213,6 +215,64 @@ func (c *Client) handleTask(ctx context.Context, task protocol.TaskPayload, send
 			time.Sleep(2 * time.Second)
 			os.Exit(0)
 		}()
+	}
+}
+
+func (c *Client) selfUpdateLoop(ctx context.Context, stop <-chan struct{}) {
+	if !c.cfg.SelfUpdate {
+		return
+	}
+	interval := c.cfg.SelfUpdateInterval
+	if interval <= 0 {
+		interval = time.Hour
+	}
+	timer := time.NewTimer(45 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			c.runSelfUpdateCheck(ctx)
+			timer.Reset(interval)
+		case <-stop:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (c *Client) runSelfUpdateCheck(ctx context.Context) {
+	executor := TaskExecutor{
+		Docker:            c.docker,
+		Detector:          c.detector,
+		ServerURL:         c.cfg.ServerURL,
+		RegistrationToken: c.cfg.RegistrationToken,
+		NodeName:          c.cfg.Name,
+		ComposeDirs:       c.cfg.ComposeDirs,
+		MetricsInterval:   c.cfg.MetricsInterval,
+		SnapshotInterval:  c.cfg.SnapshotInterval,
+		UpdateCacheTTL:    c.cfg.UpdateCacheTTL,
+		InstallMode:       c.cfg.InstallMode,
+		ReleaseRepo:       c.cfg.ReleaseRepo,
+		AgentImage:        c.cfg.AgentImage,
+		AllowDeploy:       c.cfg.AllowDeploy,
+	}
+	logLine := func(line string) {
+		log.Printf("self-update: %s", line)
+	}
+	restart, err := executor.agentUpdate(ctx, protocol.TaskPayload{
+		ID:   "agent-self-update",
+		Kind: "agent_update",
+		Args: map[string]string{"version": "latest"},
+	}, logLine)
+	if err != nil {
+		log.Printf("agent self-update check failed: %v", err)
+		return
+	}
+	if restart {
+		log.Printf("agent self-update installed a new binary; restarting")
+		time.Sleep(2 * time.Second)
+		os.Exit(0)
 	}
 }
 

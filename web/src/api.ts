@@ -10,6 +10,7 @@ import type {
   RuntimeSettings,
   Task,
   TaskLog,
+  UpdateRecord,
   User,
   VersionInfo
 } from './types'
@@ -94,6 +95,7 @@ export const api = {
       body: JSON.stringify(body)
     }),
   taskLogs: async (id: string) => asArray(await request<TaskLog[] | null>(`/api/tasks/${id}/logs`)),
+  updateRecords: async () => asArray(await request<UpdateRecord[] | null>('/api/update-records?limit=100')),
   cancelTask: (id: string) => request<{ status: string }>(`/api/tasks/${id}/cancel`, { method: 'POST' }),
   clearTasks: (scope = 'finished') => request<{ deleted: number }>(`/api/tasks?scope=${encodeURIComponent(scope)}`, { method: 'DELETE' }),
   policies: async () => asArray(await request<Policy[] | null>('/api/policies')),

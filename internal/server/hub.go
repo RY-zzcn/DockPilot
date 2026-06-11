@@ -279,6 +279,7 @@ func (h *AgentHub) handleAgentMessage(msg protocol.Message) {
 				}
 			}
 			if status == TaskSuccess && (task.Kind == "compose_update" || task.Kind == "compose_deploy") {
+				_ = h.store.InsertUpdateRecords(task, payload.ImageChanges)
 				_ = h.store.ClearUpdateAvailabilityForTask(task)
 			}
 			raw, _ := json.Marshal(payload)

@@ -47,6 +47,8 @@ Examples:
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- install-agent-binary --server-url http://1.2.3.4:8080 --registration-token YOUR_TOKEN
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash
   curl -fsSL https://raw.githubusercontent.com/RY-zzcn/DockPilot/main/scripts/dockpilot-install.sh | bash -s -- uninstall --target agent
+
+Re-running an Agent install command overwrites the local Agent connection settings and restarts the Agent.
 EOF
 }
 
@@ -324,6 +326,9 @@ DOCKPILOT_UPDATE_CACHE_SECONDS=${DOCKPILOT_UPDATE_CACHE_SECONDS:-900}
 DOCKPILOT_INSTALL_MODE=${install_mode}
 DOCKPILOT_RELEASE_REPO=${REPO}
 DOCKPILOT_AGENT_IMAGE=${AGENT_IMAGE}
+DOCKPILOT_AGENT_SELF_UPDATE=${DOCKPILOT_AGENT_SELF_UPDATE:-true}
+DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS=${DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS:-3600}
+DOCKPILOT_AGENT_ALLOW_DEPLOY=${DOCKPILOT_AGENT_ALLOW_DEPLOY:-false}
 EOF
   chmod 600 "$AGENT_ENV_FILE"
 }
@@ -402,6 +407,9 @@ services:
       DOCKPILOT_INSTALL_MODE: docker
       DOCKPILOT_RELEASE_REPO: ${DOCKPILOT_RELEASE_REPO:-RY-zzcn/DockPilot}
       DOCKPILOT_AGENT_IMAGE: ${DOCKPILOT_AGENT_IMAGE:-ghcr.io/ry-zzcn/dockpilot-agent}
+      DOCKPILOT_AGENT_SELF_UPDATE: ${DOCKPILOT_AGENT_SELF_UPDATE:-true}
+      DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS: ${DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS:-3600}
+      DOCKPILOT_AGENT_ALLOW_DEPLOY: ${DOCKPILOT_AGENT_ALLOW_DEPLOY:-false}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt:/opt

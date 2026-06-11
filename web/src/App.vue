@@ -425,7 +425,7 @@
               <div class="segmented compact-segmented">
                 <button :class="{ active: projectFilter === 'all' }" @click="projectFilter = 'all'">全部</button>
                 <button :class="{ active: projectFilter === 'updates' }" @click="projectFilter = 'updates'">可更新</button>
-                <button :class="{ active: projectFilter === 'failed' }" @click="projectFilter = 'failed'">异常</button>
+                <button :class="{ active: projectFilter === 'failed' }" @click="projectFilter = 'failed'">需处理</button>
                 <button :class="{ active: projectFilter === 'current' }" @click="projectFilter = 'current'">正常</button>
               </div>
             </div>
@@ -471,7 +471,7 @@
             <div v-if="selectedProject" class="project-meta">
               <span><strong>状态</strong><em :class="detectionBadgeClass(selectedProject)" :title="detectionTitle(selectedProject)">{{ detectionLabel(selectedProject) }}</em></span>
               <span><strong>检测</strong>{{ detectionMeta(selectedProject) || '-' }}</span>
-              <span v-if="selectedProject.detection_error" class="error-text"><strong>错误</strong>{{ selectedProject.detection_error }}</span>
+              <span v-if="detectionReason(selectedProject)" class="error-text"><strong>原因</strong>{{ detectionReason(selectedProject) }}</span>
             </div>
             <form class="compose-editor" @submit.prevent="saveCompose">
               <div class="form-grid">
@@ -528,7 +528,7 @@
           <article class="metric-card danger">
             <div>
               <AlertTriangle :size="18" />
-              <span>检测异常</span>
+              <span>需处理</span>
             </div>
             <strong>{{ failedProjects.length }}</strong>
           </article>
@@ -536,7 +536,7 @@
 
         <section class="surface">
           <div class="surface-head">
-            <h2>策略</h2>
+            <h2>自动更新策略</h2>
             <Shield :size="18" />
           </div>
           <div class="policy-grid">
@@ -566,15 +566,15 @@
                 <span>{{ row.project.path }}</span>
                 <em :class="detectionBadgeClass(row.project)" :title="detectionTitle(row.project)">{{ detectionLabel(row.project) }}</em>
                 <small v-if="detectionMeta(row.project)">{{ detectionMeta(row.project) }}</small>
-                <small v-if="row.project.detection_error" class="error-text">{{ row.project.detection_error }}</small>
+                <small v-if="detectionReason(row.project)" class="error-text">{{ detectionReason(row.project) }}</small>
               </div>
               <div class="segmented">
-                <button :class="{ active: row.policy.mode === 'manual' }" @click="row.policy.mode = 'manual'">手动</button>
-                <button :class="{ active: row.policy.mode === 'scheduled' }" @click="row.policy.mode = 'scheduled'">定时</button>
-                <button :class="{ active: row.policy.mode === 'automatic' }" @click="row.policy.mode = 'automatic'">全自动</button>
+                <button :class="{ active: row.policy.mode === 'manual' }" @click="row.policy.mode = 'manual'">不自动</button>
+                <button :class="{ active: row.policy.mode === 'scheduled' }" @click="row.policy.mode = 'scheduled'">按计划</button>
+                <button :class="{ active: row.policy.mode === 'automatic' }" @click="row.policy.mode = 'automatic'">自动更新</button>
               </div>
-              <input v-model="row.policy.schedule" class="schedule-input" placeholder="interval:1h / @daily" />
-              <input v-model="row.policy.exclude_patterns" class="schedule-input" placeholder="排除关键字" />
+              <input v-model="row.policy.schedule" class="schedule-input" placeholder="自动更新间隔 interval:1h / @daily" />
+              <input v-model="row.policy.exclude_patterns" class="schedule-input" placeholder="不自动更新的关键字" />
               <div class="button-row compact-actions">
                 <button class="icon-button" title="保存策略" :disabled="!isAdmin" @click="savePolicy(row.policy)">
                   <Save :size="16" />
@@ -587,6 +587,29 @@
                 </button>
               </div>
             </article>
+          </div>
+        </section>
+
+        <section class="surface">
+          <div class="surface-head">
+            <h2>更新记录</h2>
+            <History :size="18" />
+          </div>
+          <div class="data-table update-record-table">
+            <div class="table-row table-head">
+              <span>时间</span>
+              <span>容器</span>
+              <span>节点</span>
+              <span>镜像变化</span>
+              <span>状态</span>
+            </div>
+            <div v-for="record in updateRecords" :key="record.id" class="table-row">
+              <span>{{ record.created_at }}</span>
+              <strong>{{ record.name || '-' }}</strong>
+              <span>{{ taskNodeName(record.node_id) }}</span>
+              <span>{{ shortVersion(record.previous_version) }} -> {{ shortVersion(record.current_version) }}</span>
+              <span><em class="badge" :class="record.changed ? 'success' : 'pending'">{{ record.changed ? '已更新' : '未变化' }}</em></span>
+            </div>
           </div>
         </section>
 
@@ -712,14 +735,14 @@
             <form class="form-stack" @submit.prevent="saveRuntimeSettings">
               <label class="checkline">
                 <input v-model="runtimeSettings.agent_auto_update" type="checkbox" :disabled="!isAdmin" />
-                Agent 自动升级
+                面板代管 Agent 升级
               </label>
               <label>
-                <span>Agent 目标版本</span>
+                <span>代管目标版本</span>
                 <input v-model="runtimeSettings.agent_auto_update_version" :disabled="!isAdmin" placeholder="latest 或 v0.2.0" />
               </label>
               <label>
-                <span>扫描间隔</span>
+                <span>代管扫描间隔</span>
                 <input :value="formatDuration(runtimeSettings.agent_auto_update_interval_seconds)" disabled />
               </label>
               <button class="primary aligned" :disabled="!isAdmin">
@@ -854,6 +877,7 @@ import {
   Eraser,
   FileCode2,
   HardDrive,
+  History,
   LayoutDashboard,
   LogIn,
   LogOut,
@@ -888,6 +912,7 @@ import type {
   RuntimeSettings,
   Task,
   TaskLog,
+  UpdateRecord,
   User,
   VersionInfo
 } from './types'
@@ -972,6 +997,7 @@ const overview = reactive<Overview>({
 const nodes = ref<Node[]>([])
 const dockerState = reactive<DockerState>({ containers: [], images: [], compose_projects: [] })
 const tasks = ref<Task[]>([])
+const updateRecords = ref<UpdateRecord[]>([])
 const policies = ref<Policy[]>([])
 const notifications = ref<Notification[]>([])
 const users = ref<User[]>([])
@@ -1186,20 +1212,20 @@ const PolicyEditor = defineComponent({
           disabled: props.disabled,
           onChange: (event: Event) => (props.policy.mode = (event.target as HTMLSelectElement).value as Policy['mode'])
         }, [
-          h('option', { value: 'manual' }, '手动'),
-          h('option', { value: 'scheduled' }, '定时'),
-          h('option', { value: 'automatic' }, '全自动')
+          h('option', { value: 'manual' }, '不自动更新'),
+          h('option', { value: 'scheduled' }, '按计划更新'),
+          h('option', { value: 'automatic' }, '检测到更新后自动更新')
         ]),
         h('input', {
           value: props.policy.schedule,
           disabled: props.disabled,
-          placeholder: 'interval:1h / @daily',
+          placeholder: '自动更新间隔 interval:1h / @daily',
           onInput: (event: Event) => (props.policy.schedule = (event.target as HTMLInputElement).value)
         }),
         h('input', {
           value: props.policy.exclude_patterns,
           disabled: props.disabled,
-          placeholder: 'mysql,postgres,redis',
+          placeholder: '不自动更新的关键字',
           onInput: (event: Event) => (props.policy.exclude_patterns = (event.target as HTMLInputElement).value)
         }),
         h('label', { class: 'checkline' }, [
@@ -1377,10 +1403,11 @@ async function refreshAll() {
 async function doRefreshAll() {
   error.value = ''
   try {
-    const [overviewData, nodesData, tasksData, policiesData, notificationsData, versionData] = await Promise.all([
+    const [overviewData, nodesData, tasksData, recordsData, policiesData, notificationsData, versionData] = await Promise.all([
       api.overview(),
       api.nodes(),
       api.tasks(),
+      api.updateRecords(),
       api.policies(),
       api.notifications(),
       api.version()
@@ -1388,6 +1415,7 @@ async function doRefreshAll() {
     Object.assign(overview, overviewData)
     nodes.value = nodesData
     tasks.value = tasksData
+    updateRecords.value = recordsData
     policies.value = policiesData
     notifications.value = notificationsData
     Object.assign(versionInfo, versionData)
@@ -1652,7 +1680,7 @@ function policyDraftFor(scope: string, scopeId: string): Policy {
       : {
           scope,
           scope_id: scopeId,
-          mode: 'scheduled',
+          mode: 'manual',
           schedule: 'interval:1h',
           exclude_patterns: 'mysql,postgres,mariadb,redis',
           enabled: true
@@ -1740,9 +1768,9 @@ async function copyCommand(command: string) {
 }
 
 function detectionLabel(project: ComposeProject) {
-  if (project.detection_status === 'partial') return '部分异常'
-  if (project.detection_status === 'failed') return '检测失败'
   if (project.update_available || project.detection_status === 'update_available') return '有更新'
+  if (project.detection_status === 'partial') return '已检测，需处理'
+  if (project.detection_status === 'failed') return '无法检测'
   if (project.detection_status === 'checked' || project.detection_status === 'current') return '已是最新'
   if (project.checked_at) return '已是最新'
   return '未检测'
@@ -1761,7 +1789,47 @@ function detectionMeta(project: ComposeProject) {
 }
 
 function detectionTitle(project: ComposeProject) {
-  return [detectionLabel(project), detectionMeta(project), project.detection_error].filter(Boolean).join('\n')
+  return [detectionLabel(project), detectionMeta(project), detectionReason(project), project.detection_error].filter(Boolean).join('\n')
+}
+
+function detectionReason(project: ComposeProject) {
+  const errorText = project.detection_error || ''
+  if (!errorText && project.detection_status !== 'partial' && project.detection_status !== 'failed') {
+    return ''
+  }
+  return friendlyDetectionReason(errorText, project.detection_status)
+}
+
+function friendlyDetectionReason(errorText: string, status: string) {
+  const lower = errorText.toLowerCase()
+  if (lower.includes('outside agent allowed directories')) {
+    return '这个 Compose 文件不在 Agent 允许扫描的目录内。请把项目放到 /opt、/srv、/var/www，或在节点端调整 DOCKPILOT_COMPOSE_DIRS。'
+  }
+  if (lower.includes('no such file or directory') || lower.includes('compose file not found')) {
+    return '节点上找不到这个 Compose 文件。请确认路径存在，并且 Agent 容器挂载了该目录。'
+  }
+  if (lower.includes('variable is not set') || lower.includes('not set. defaulting to a blank string')) {
+    return 'Compose 缺少环境变量。请在项目目录补齐 .env，或在 compose 文件里给变量设置默认值。'
+  }
+  if (lower.includes('empty section between colons') || lower.includes('invalid spec')) {
+    return 'Compose 挂载路径不完整，通常是环境变量为空导致类似 :/www 的挂载。请先修正 .env 或 volumes。'
+  }
+  if (lower.includes('unauthorized') || lower.includes('authentication required') || lower.includes('denied')) {
+    return '镜像仓库需要登录或没有权限。请在节点上完成 docker login，或确认镜像地址可以公开拉取。'
+  }
+  if (lower.includes('timeout') || lower.includes('no route to host') || lower.includes('temporary failure') || lower.includes('connection refused')) {
+    return '节点访问镜像仓库或网络超时。请检查节点网络、DNS、防火墙和仓库可用性。'
+  }
+  if (lower.includes('image update checks failed')) {
+    return '有镜像没有完成远端版本比对。请查看任务日志里的具体镜像和仓库错误。'
+  }
+  if (status === 'partial') {
+    return '部分镜像已经检测完成，但还有项目配置或仓库访问问题需要处理。'
+  }
+  if (status === 'failed') {
+    return '这个项目没有完成检测。请打开任务日志查看节点返回的具体错误。'
+  }
+  return ''
 }
 
 function taskMessage(task: Task) {
@@ -1881,5 +1949,13 @@ function formatDuration(seconds: number) {
   if (seconds % 3600 === 0) return `${seconds / 3600} 小时`
   if (seconds % 60 === 0) return `${seconds / 60} 分钟`
   return `${seconds} 秒`
+}
+
+function shortVersion(value?: string) {
+  if (!value) return '-'
+  if (value.startsWith('sha256:') && value.length > 19) {
+    return value.slice(0, 19)
+  }
+  return value.length > 24 ? `${value.slice(0, 24)}...` : value
 }
 </script>

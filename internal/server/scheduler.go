@@ -60,6 +60,9 @@ func (s *Scheduler) tick() {
 	if err := s.enqueueAgentUpdateTasks(); err != nil {
 		log.Printf("enqueue agent update tasks failed: %v", err)
 	}
+	if err := s.store.PruneTaskHistory(); err != nil {
+		log.Printf("prune task history failed: %v", err)
+	}
 }
 
 func (s *Scheduler) enqueuePolicyTasks() error {
@@ -76,32 +79,26 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 			continue
 		}
 		for _, project := range state.ComposeProjects {
+			if s.detectionDue(node.ID, project.ID) {
+				task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "detect_updates", "scheduler", "")
+				if err == nil {
+					s.lastRun[detectionKey(node.ID, project.ID)] = time.Now()
+					_ = s.hub.EnqueueTask(task)
+				}
+			}
+
+			if !project.UpdateAvailable {
+				continue
+			}
 			policy, err := s.store.EffectivePolicy("", project.ID, node.ID)
-			if err != nil || !policy.Enabled || policy.Mode == PolicyManual {
+			if err != nil || !policy.Enabled || policy.Mode == PolicyManual || excluded(policy.ExcludePatterns, project.Name, project.Path) {
 				continue
 			}
-			if excluded(policy.ExcludePatterns, project.Name, project.Path) {
-				continue
-			}
-			key := policy.ID + ":" + node.ID + ":" + project.ID
+			key := "compose-update:" + policy.ID + ":" + node.ID + ":" + project.ID
 			if !due(policy, s.lastRun[key]) {
 				continue
 			}
-			kind := "detect_updates"
-			if policy.Mode == PolicyAutomatic {
-				kind = "compose_update"
-			}
-			args := map[string]string{"path": project.Path, "name": project.Name}
-			payload, _ := json.Marshal(args)
-			task, err := s.store.CreateTask(Task{
-				NodeID:      node.ID,
-				Kind:        kind,
-				TargetType:  "compose",
-				TargetID:    project.ID,
-				RequestedBy: "scheduler",
-				PolicyID:    policy.ID,
-				Payload:     string(payload),
-			})
+			task, err := s.createComposeTask(node, project.ID, project.Name, project.Path, "compose_update", "scheduler", policy.ID)
 			if err != nil {
 				continue
 			}
@@ -110,6 +107,28 @@ func (s *Scheduler) enqueuePolicyTasks() error {
 		}
 	}
 	return nil
+}
+
+func (s *Scheduler) detectionDue(nodeID, projectID string) bool {
+	return due(Policy{Schedule: DefaultDetectionSchedule}, s.lastRun[detectionKey(nodeID, projectID)])
+}
+
+func detectionKey(nodeID, projectID string) string {
+	return "detect:" + nodeID + ":" + projectID
+}
+
+func (s *Scheduler) createComposeTask(node Node, projectID, projectName, projectPath, kind, requestedBy, policyID string) (Task, error) {
+	args := map[string]string{"path": projectPath, "name": projectName}
+	payload, _ := json.Marshal(args)
+	return s.store.CreateTask(Task{
+		NodeID:      node.ID,
+		Kind:        kind,
+		TargetType:  "compose",
+		TargetID:    projectID,
+		RequestedBy: requestedBy,
+		PolicyID:    policyID,
+		Payload:     string(payload),
+	})
 }
 
 func (s *Scheduler) enqueueAgentUpdateTasks() error {

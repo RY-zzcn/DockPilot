@@ -10,19 +10,22 @@ import (
 )
 
 type Config struct {
-	ServerURL         string
-	NodeID            string
-	NodeToken         string
-	RegistrationToken string
-	Name              string
-	StatePath         string
-	ComposeDirs       []string
-	MetricsInterval   time.Duration
-	SnapshotInterval  time.Duration
-	UpdateCacheTTL    time.Duration
-	InstallMode       string
-	ReleaseRepo       string
-	AgentImage        string
+	ServerURL          string
+	NodeID             string
+	NodeToken          string
+	RegistrationToken  string
+	Name               string
+	StatePath          string
+	ComposeDirs        []string
+	MetricsInterval    time.Duration
+	SnapshotInterval   time.Duration
+	UpdateCacheTTL     time.Duration
+	InstallMode        string
+	ReleaseRepo        string
+	AgentImage         string
+	SelfUpdate         bool
+	SelfUpdateInterval time.Duration
+	AllowDeploy        bool
 }
 
 type State struct {
@@ -34,19 +37,22 @@ func LoadConfig() Config {
 	hostname, _ := os.Hostname()
 	home, _ := os.UserHomeDir()
 	cfg := Config{
-		ServerURL:         env("DOCKPILOT_SERVER_URL", "http://127.0.0.1:8080"),
-		NodeID:            env("DOCKPILOT_NODE_ID", ""),
-		NodeToken:         env("DOCKPILOT_NODE_TOKEN", ""),
-		RegistrationToken: env("DOCKPILOT_REGISTRATION_TOKEN", ""),
-		Name:              env("DOCKPILOT_NODE_NAME", hostname),
-		StatePath:         env("DOCKPILOT_STATE_PATH", filepath.Join(home, ".dockpilot-agent.json")),
-		ComposeDirs:       splitCSV(env("DOCKPILOT_COMPOSE_DIRS", "/opt,/srv,/var/www")),
-		MetricsInterval:   time.Duration(envInt("DOCKPILOT_METRICS_INTERVAL_SECONDS", 15)) * time.Second,
-		SnapshotInterval:  time.Duration(envInt("DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS", 60)) * time.Second,
-		UpdateCacheTTL:    time.Duration(envInt("DOCKPILOT_UPDATE_CACHE_SECONDS", 900)) * time.Second,
-		InstallMode:       env("DOCKPILOT_INSTALL_MODE", ""),
-		ReleaseRepo:       env("DOCKPILOT_RELEASE_REPO", "RY-zzcn/DockPilot"),
-		AgentImage:        env("DOCKPILOT_AGENT_IMAGE", "ghcr.io/ry-zzcn/dockpilot-agent"),
+		ServerURL:          env("DOCKPILOT_SERVER_URL", "http://127.0.0.1:8080"),
+		NodeID:             env("DOCKPILOT_NODE_ID", ""),
+		NodeToken:          env("DOCKPILOT_NODE_TOKEN", ""),
+		RegistrationToken:  env("DOCKPILOT_REGISTRATION_TOKEN", ""),
+		Name:               env("DOCKPILOT_NODE_NAME", hostname),
+		StatePath:          env("DOCKPILOT_STATE_PATH", filepath.Join(home, ".dockpilot-agent.json")),
+		ComposeDirs:        splitCSV(env("DOCKPILOT_COMPOSE_DIRS", "/opt,/srv,/var/www")),
+		MetricsInterval:    time.Duration(envInt("DOCKPILOT_METRICS_INTERVAL_SECONDS", 15)) * time.Second,
+		SnapshotInterval:   time.Duration(envInt("DOCKPILOT_SNAPSHOT_INTERVAL_SECONDS", 60)) * time.Second,
+		UpdateCacheTTL:     time.Duration(envInt("DOCKPILOT_UPDATE_CACHE_SECONDS", 900)) * time.Second,
+		InstallMode:        env("DOCKPILOT_INSTALL_MODE", ""),
+		ReleaseRepo:        env("DOCKPILOT_RELEASE_REPO", "RY-zzcn/DockPilot"),
+		AgentImage:         env("DOCKPILOT_AGENT_IMAGE", "ghcr.io/ry-zzcn/dockpilot-agent"),
+		SelfUpdate:         envBool("DOCKPILOT_AGENT_SELF_UPDATE", true),
+		SelfUpdateInterval: time.Duration(envInt("DOCKPILOT_AGENT_SELF_UPDATE_INTERVAL_SECONDS", 3600)) * time.Second,
+		AllowDeploy:        envBool("DOCKPILOT_AGENT_ALLOW_DEPLOY", false),
 	}
 	flag.StringVar(&cfg.ServerURL, "server", cfg.ServerURL, "DockPilot server URL")
 	flag.StringVar(&cfg.RegistrationToken, "registration-token", cfg.RegistrationToken, "one-time registration token")
@@ -57,6 +63,8 @@ func LoadConfig() Config {
 	flag.StringVar(&cfg.InstallMode, "install-mode", cfg.InstallMode, "agent install mode: binary or docker")
 	flag.StringVar(&cfg.ReleaseRepo, "release-repo", cfg.ReleaseRepo, "GitHub repo for DockPilot releases")
 	flag.StringVar(&cfg.AgentImage, "agent-image", cfg.AgentImage, "Docker image used for agent self-update")
+	flag.BoolVar(&cfg.SelfUpdate, "self-update", cfg.SelfUpdate, "automatically update agent when a newer DockPilot release exists")
+	flag.BoolVar(&cfg.AllowDeploy, "allow-deploy", cfg.AllowDeploy, "allow compose deploy tasks from the server")
 	composeDirs := strings.Join(cfg.ComposeDirs, ",")
 	flag.StringVar(&composeDirs, "compose-dirs", composeDirs, "comma-separated compose scan directories")
 	flag.Parse()
@@ -112,6 +120,21 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true
+	case "0", "f", "false", "n", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func splitCSV(value string) []string {

@@ -180,6 +180,8 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 		RequireAdmin(a.handleCreateTask)(w, r)
 	case path == "/tasks" && r.Method == http.MethodDelete:
 		RequireAdmin(a.handleClearTasks)(w, r)
+	case path == "/update-records" && r.Method == http.MethodGet:
+		a.handleUpdateRecords(w, r)
 	case strings.HasSuffix(path, "/logs") && strings.HasPrefix(path, "/tasks/") && r.Method == http.MethodGet:
 		taskID := strings.TrimSuffix(strings.TrimPrefix(path, "/tasks/"), "/logs")
 		a.handleTaskLogs(w, r, taskID)
@@ -435,6 +437,10 @@ func (a *App) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "node_id and kind are required")
 		return
 	}
+	if !allowedTaskKind(body.Kind) {
+		writeError(w, http.StatusBadRequest, "unsupported task kind")
+		return
+	}
 	body.Args = a.prepareTaskArgs(r, body.Kind, body.Args)
 	if body.Kind == "agent_update" {
 		body.TargetType = nonEmpty(body.TargetType, "node")
@@ -458,6 +464,15 @@ func (a *App) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, task)
+}
+
+func allowedTaskKind(kind string) bool {
+	switch kind {
+	case "detect_updates", "agent_update", "compose_update", "compose_deploy", "restart_container", "prune_images":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) prepareTaskArgs(r *http.Request, kind string, args map[string]string) map[string]string {
@@ -499,6 +514,21 @@ func (a *App) handleClearTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
 }
 
+func (a *App) handleUpdateRecords(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	records, err := a.store.ListUpdateRecords(limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, records)
+}
+
 func (a *App) handleCancelTask(w http.ResponseWriter, r *http.Request, taskID string) {
 	if err := a.store.FinishTask(taskID, TaskCanceled, `{"message":"canceled by user"}`); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -528,7 +558,7 @@ func (a *App) handleUpsertPolicy(w http.ResponseWriter, r *http.Request) {
 	if policy.Mode == "" {
 		policy.Mode = DefaultPolicyMode
 	}
-	if policy.Schedule == "" && policy.Mode != PolicyManual {
+	if policy.Schedule == "" {
 		policy.Schedule = DefaultPolicySchedule
 	}
 	saved, err := a.store.UpsertPolicy(policy)

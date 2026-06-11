@@ -123,6 +123,19 @@ export interface TaskLog {
   created_at: string
 }
 
+export interface UpdateRecord {
+  id: number
+  node_id: string
+  task_id: string
+  target_type: string
+  target_id: string
+  name: string
+  previous_version?: string
+  current_version?: string
+  changed: boolean
+  created_at: string
+}
+
 export interface Policy {
   id?: string
   scope: string

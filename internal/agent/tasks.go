@@ -28,6 +28,7 @@ type TaskExecutor struct {
 	InstallMode       string
 	ReleaseRepo       string
 	AgentImage        string
+	AllowDeploy       bool
 }
 
 func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, logLine func(string)) protocol.TaskResultPayload {
@@ -47,15 +48,19 @@ func (t TaskExecutor) Execute(ctx context.Context, task protocol.TaskPayload, lo
 	case "agent_update":
 		restartAgent, err = t.agentUpdate(taskCtx, task, logLine)
 	case "compose_update":
-		err = t.composeUpdate(taskCtx, task, logLine)
+		var changes []protocol.ImageChange
+		changes, err = t.composeUpdate(taskCtx, task, logLine)
+		status.ImageChanges = changes
 	case "compose_deploy":
-		err = t.composeDeploy(taskCtx, task, logLine)
+		var changes []protocol.ImageChange
+		changes, err = t.composeDeploy(taskCtx, task, logLine)
+		status.ImageChanges = changes
 	case "restart_container":
 		err = runLogged(taskCtx, logLine, "docker", "restart", task.TargetID)
 	case "prune_images":
 		err = runLogged(taskCtx, logLine, "docker", "image", "prune", "-f")
 	default:
-		err = runLogged(taskCtx, logLine, "docker", task.Kind)
+		err = fmt.Errorf("unsupported agent task: %s", task.Kind)
 	}
 	if err != nil {
 		status.Status = "failed"
@@ -107,6 +112,11 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 		Path:        path,
 		Images:      []protocol.ImageUpdateDetection{},
 	}
+	if !t.pathAllowed(path) {
+		err := fmt.Errorf("compose file is outside agent allowed directories: %s", path)
+		detection.Error = err.Error()
+		return detection, err
+	}
 	images, err := composeImages(ctx, path)
 	if err != nil {
 		runtimeImages := composeRuntimeImages(ctx, name)
@@ -156,26 +166,29 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 	return detection, nil
 }
 
-func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPayload, logLine func(string)) error {
+func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPayload, logLine func(string)) ([]protocol.ImageChange, error) {
 	path := task.Args["path"]
 	if path == "" {
 		path = task.TargetID
 	}
 	path = composeFilePath(path)
 	if path == "" {
-		return fmt.Errorf("compose path is required")
+		return nil, fmt.Errorf("compose path is required")
+	}
+	if !t.pathAllowed(path) {
+		return nil, fmt.Errorf("compose file is outside agent allowed directories: %s", path)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("compose file not found: %s", path)
+		return nil, fmt.Errorf("compose file not found: %s", path)
 	}
 	if info.IsDir() {
-		return fmt.Errorf("compose file not found in directory: %s", path)
+		return nil, fmt.Errorf("compose file not found in directory: %s", path)
 	}
 	projectDir := composeProjectDir(path)
 	logLine("Compose project directory: " + projectDir)
 	if err := composePreflight(ctx, path); err != nil {
-		return err
+		return nil, err
 	}
 	before, beforeErr := composeContainerImageIDs(ctx, path)
 	if beforeErr != nil {
@@ -188,7 +201,7 @@ func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPaylo
 		args = append([]string{"compose"}, composeFileArgs(path)...)
 		args = append(args, "pull")
 		if _, retryErr := runLoggedInDir(ctx, projectDir, logLine, "docker", args...); retryErr != nil {
-			return retryErr
+			return nil, retryErr
 		}
 	}
 	args = append([]string{"compose"}, composeFileArgs(path)...)
@@ -199,29 +212,36 @@ func (t TaskExecutor) composeUpdate(ctx context.Context, task protocol.TaskPaylo
 		out, err = runLoggedInDir(ctx, projectDir, logLine, "docker", args...)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	after, afterErr := composeContainerImageIDs(ctx, path)
 	if afterErr != nil {
 		logLine("Unable to read compose container images after update: " + afterErr.Error())
-		return nil
+		return nil, nil
 	}
-	logComposeImageChanges(logLine, before, after)
-	return nil
+	changes := composeImageChanges(task, before, after)
+	logComposeImageChanges(logLine, changes)
+	return changes, nil
 }
 
-func (t TaskExecutor) composeDeploy(ctx context.Context, task protocol.TaskPayload, logLine func(string)) error {
+func (t TaskExecutor) composeDeploy(ctx context.Context, task protocol.TaskPayload, logLine func(string)) ([]protocol.ImageChange, error) {
+	if !t.AllowDeploy {
+		return nil, fmt.Errorf("compose deploy is disabled on this agent; set DOCKPILOT_AGENT_ALLOW_DEPLOY=true on the node to allow server-initiated deploys")
+	}
 	path := task.Args["path"]
 	content := task.Args["content"]
 	if path == "" {
 		path = filepath.Join("/opt", strings.TrimSpace(task.Args["name"]), "compose.yml")
 	}
+	if !t.pathAllowed(path) {
+		return nil, fmt.Errorf("compose file is outside agent allowed directories: %s", path)
+	}
 	if content != "" {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
+			return nil, err
 		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			return err
+			return nil, err
 		}
 		logLine("Compose file written: " + path)
 	}
@@ -232,6 +252,39 @@ func (t TaskExecutor) composeDeploy(ctx context.Context, task protocol.TaskPaylo
 		TargetID:   task.TargetID,
 		Args:       map[string]string{"path": path},
 	}, logLine)
+}
+
+func (t TaskExecutor) pathAllowed(path string) bool {
+	if path == "" {
+		return false
+	}
+	resolved, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	if evaluated, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = evaluated
+	}
+	if len(t.ComposeDirs) == 0 {
+		return true
+	}
+	for _, root := range t.ComposeDirs {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		if evaluated, err := filepath.EvalSymlinks(absRoot); err == nil {
+			absRoot = evaluated
+		}
+		if resolved == absRoot || strings.HasPrefix(resolved, strings.TrimRight(absRoot, string(os.PathSeparator))+string(os.PathSeparator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func runLogged(ctx context.Context, logLine func(string), name string, args ...string) error {
@@ -432,21 +485,37 @@ func composeContainerImageIDs(ctx context.Context, path string) (map[string]stri
 	return images, nil
 }
 
-func logComposeImageChanges(logLine func(string), before, after map[string]string) {
-	if len(after) == 0 {
+func composeImageChanges(task protocol.TaskPayload, before, after map[string]string) []protocol.ImageChange {
+	changes := make([]protocol.ImageChange, 0, len(after))
+	for name, afterID := range after {
+		beforeID := before[name]
+		changes = append(changes, protocol.ImageChange{
+			TargetType:      task.TargetType,
+			TargetID:        task.TargetID,
+			Name:            name,
+			PreviousVersion: beforeID,
+			CurrentVersion:  afterID,
+			Changed:         beforeID == "" || beforeID != afterID,
+		})
+	}
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Name < changes[j].Name })
+	return changes
+}
+
+func logComposeImageChanges(logLine func(string), changes []protocol.ImageChange) {
+	if len(changes) == 0 {
 		logLine("Compose update finished, but no running containers were found for this project.")
 		return
 	}
 	changed := 0
-	for name, afterID := range after {
-		beforeID := before[name]
+	for _, item := range changes {
 		switch {
-		case beforeID == "":
+		case item.PreviousVersion == "":
 			changed++
-			logLine(fmt.Sprintf("Container %s is now running image %s", name, shortContainerImageID(afterID)))
-		case beforeID != afterID:
+			logLine(fmt.Sprintf("Container %s is now running image %s", item.Name, shortContainerImageID(item.CurrentVersion)))
+		case item.Changed:
 			changed++
-			logLine(fmt.Sprintf("Container %s image changed: %s -> %s", name, shortContainerImageID(beforeID), shortContainerImageID(afterID)))
+			logLine(fmt.Sprintf("Container %s image changed: %s -> %s", item.Name, shortContainerImageID(item.PreviousVersion), shortContainerImageID(item.CurrentVersion)))
 		}
 	}
 	if changed == 0 {
