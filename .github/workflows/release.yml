@@ -21,50 +21,14 @@ env:
   AGENT_IMAGE: ghcr.io/ry-zzcn/dockpilot-agent
 
 jobs:
-  build-binaries:
-    name: Build binaries (${{ matrix.suffix }})
+  resolve-release:
+    name: Resolve release metadata
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - suffix: linux_amd64
-            goos: linux
-            goarch: amd64
-            goarm: ''
-            server_bundle: true
-          - suffix: linux_arm64
-            goos: linux
-            goarch: arm64
-            goarm: ''
-            server_bundle: true
-          - suffix: linux_armv7
-            goos: linux
-            goarch: arm
-            goarm: '7'
-            server_bundle: false
-          - suffix: linux_armv6
-            goos: linux
-            goarch: arm
-            goarm: '6'
-            server_bundle: false
-          - suffix: linux_386
-            goos: linux
-            goarch: '386'
-            goarm: ''
-            server_bundle: false
-          - suffix: linux_riscv64
-            goos: linux
-            goarch: riscv64
-            goarm: ''
-            server_bundle: false
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      clean_version: ${{ steps.vars.outputs.clean_version }}
+      build_date: ${{ steps.vars.outputs.build_date }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Public content check
-        run: node scripts/check-public-content.js
-
       - name: Resolve version
         id: vars
         run: |
@@ -78,13 +42,25 @@ jobs:
           echo "clean_version=${CLEAN_VERSION}" >> "$GITHUB_OUTPUT"
           echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23.x'
+  validate-public-content:
+    name: Validate public content
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Public content check
+        run: node scripts/check-public-content.js
+
+  build-web:
+    name: Build web assets
+    needs: validate-public-content
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Node
-        if: matrix.server_bundle
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -92,21 +68,69 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Build web
-        if: matrix.server_bundle
         working-directory: web
         run: |
           npm ci
           npm run build
 
-      - name: Build and package
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockpilot-web-dist
+          path: web/dist
+          if-no-files-found: error
+
+  build-agent-binaries:
+    name: Build agent binary (${{ matrix.suffix }})
+    needs:
+      - resolve-release
+      - validate-public-content
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suffix: linux_amd64
+            goos: linux
+            goarch: amd64
+            goarm: ''
+          - suffix: linux_arm64
+            goos: linux
+            goarch: arm64
+            goarm: ''
+          - suffix: linux_armv7
+            goos: linux
+            goarch: arm
+            goarm: '7'
+          - suffix: linux_armv6
+            goos: linux
+            goarch: arm
+            goarm: '6'
+          - suffix: linux_386
+            goos: linux
+            goarch: '386'
+            goarm: ''
+          - suffix: linux_riscv64
+            goos: linux
+            goarch: riscv64
+            goarm: ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Build and package agent
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
-          SERVER_BUNDLE: ${{ matrix.server_bundle }}
           SUFFIX: ${{ matrix.suffix }}
-          VERSION: ${{ steps.vars.outputs.clean_version }}
-          BUILD_DATE: ${{ steps.vars.outputs.build_date }}
+          VERSION: ${{ needs.resolve-release.outputs.clean_version }}
+          BUILD_DATE: ${{ needs.resolve-release.outputs.build_date }}
         run: |
           set -euo pipefail
           LDFLAGS="-s -w -X github.com/dockpilot/dockpilot/internal/version.Version=${VERSION} -X github.com/dockpilot/dockpilot/internal/version.Commit=${GITHUB_SHA} -X github.com/dockpilot/dockpilot/internal/version.BuildDate=${BUILD_DATE}"
@@ -123,52 +147,99 @@ jobs:
           cp docs/deployment.md "${AGENT_DIR}/docs/"
           tar -C "${AGENT_DIR}" -czf "dist/dockpilot-agent_${VERSION}_${SUFFIX}.tar.gz" .
 
-          if [ "${SERVER_BUNDLE}" = "true" ]; then
-            SERVER_DIR="dist/server-package"
-            rm -rf "${SERVER_DIR}"
-            mkdir -p "${SERVER_DIR}/deploy" "${SERVER_DIR}/scripts" "${SERVER_DIR}/docs" "${SERVER_DIR}/web"
-            go build -mod=mod -ldflags "${LDFLAGS}" -o "${SERVER_DIR}/dockpilot-server" ./cmd/server
-            cp -R web/dist "${SERVER_DIR}/web/dist"
-            cp deploy/docker-compose.yml deploy/dockpilot-server.service "${SERVER_DIR}/deploy/"
-            cp scripts/dockpilot-install.sh "${SERVER_DIR}/scripts/"
-            cp README.md "${SERVER_DIR}/"
-            cp docs/deployment.md "${SERVER_DIR}/docs/"
-            tar -C "${SERVER_DIR}" -czf "dist/dockpilot-server_${VERSION}_${SUFFIX}.tar.gz" .
-
-            FULL_DIR="dist/full-package"
-            rm -rf "${FULL_DIR}"
-            mkdir -p "${FULL_DIR}/deploy" "${FULL_DIR}/scripts" "${FULL_DIR}/docs" "${FULL_DIR}/web"
-            cp "${SERVER_DIR}/dockpilot-server" "${FULL_DIR}/dockpilot-server"
-            cp "${AGENT_DIR}/dockpilot-agent" "${FULL_DIR}/dockpilot-agent"
-            cp -R web/dist "${FULL_DIR}/web/dist"
-            cp deploy/docker-compose.yml deploy/dockpilot-server.service deploy/dockpilot-agent.service "${FULL_DIR}/deploy/"
-            cp scripts/dockpilot-install.sh "${FULL_DIR}/scripts/"
-            cp README.md "${FULL_DIR}/"
-            cp docs/deployment.md "${FULL_DIR}/docs/"
-            tar -C "${FULL_DIR}" -czf "dist/dockpilot_${VERSION}_${SUFFIX}.tar.gz" .
-          fi
-
-      - name: Upload binary artifact
+      - name: Upload agent artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dockpilot_${{ steps.vars.outputs.clean_version }}_${{ matrix.suffix }}
+          name: dockpilot-agent_${{ needs.resolve-release.outputs.clean_version }}_${{ matrix.suffix }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-server-binaries:
+    name: Build server binary (${{ matrix.suffix }})
+    needs:
+      - resolve-release
+      - validate-public-content
+      - build-web
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suffix: linux_amd64
+            goos: linux
+            goarch: amd64
+            goarm: ''
+          - suffix: linux_arm64
+            goos: linux
+            goarch: arm64
+            goarm: ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Download web artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dockpilot-web-dist
+          path: web/dist
+
+      - name: Build and package server
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          SUFFIX: ${{ matrix.suffix }}
+          VERSION: ${{ needs.resolve-release.outputs.clean_version }}
+          BUILD_DATE: ${{ needs.resolve-release.outputs.build_date }}
+        run: |
+          set -euo pipefail
+          LDFLAGS="-s -w -X github.com/dockpilot/dockpilot/internal/version.Version=${VERSION} -X github.com/dockpilot/dockpilot/internal/version.Commit=${GITHUB_SHA} -X github.com/dockpilot/dockpilot/internal/version.BuildDate=${BUILD_DATE}"
+          export GOOS GOARCH GOARM CGO_ENABLED=0
+          mkdir -p dist
+
+          SERVER_DIR="dist/server-package"
+          rm -rf "${SERVER_DIR}"
+          mkdir -p "${SERVER_DIR}/deploy" "${SERVER_DIR}/scripts" "${SERVER_DIR}/docs" "${SERVER_DIR}/web"
+          go build -mod=mod -ldflags "${LDFLAGS}" -o "${SERVER_DIR}/dockpilot-server" ./cmd/server
+          cp -R web/dist "${SERVER_DIR}/web/dist"
+          cp deploy/docker-compose.yml deploy/dockpilot-server.service "${SERVER_DIR}/deploy/"
+          cp scripts/dockpilot-install.sh "${SERVER_DIR}/scripts/"
+          cp README.md "${SERVER_DIR}/"
+          cp docs/deployment.md "${SERVER_DIR}/docs/"
+          tar -C "${SERVER_DIR}" -czf "dist/dockpilot-server_${VERSION}_${SUFFIX}.tar.gz" .
+
+          FULL_DIR="dist/full-package"
+          rm -rf "${FULL_DIR}"
+          mkdir -p "${FULL_DIR}/deploy" "${FULL_DIR}/scripts" "${FULL_DIR}/docs" "${FULL_DIR}/web"
+          cp "${SERVER_DIR}/dockpilot-server" "${FULL_DIR}/dockpilot-server"
+          go build -mod=mod -ldflags "${LDFLAGS}" -o "${FULL_DIR}/dockpilot-agent" ./cmd/agent
+          cp -R web/dist "${FULL_DIR}/web/dist"
+          cp deploy/docker-compose.yml deploy/dockpilot-server.service deploy/dockpilot-agent.service "${FULL_DIR}/deploy/"
+          cp scripts/dockpilot-install.sh "${FULL_DIR}/scripts/"
+          cp README.md "${FULL_DIR}/"
+          cp docs/deployment.md "${FULL_DIR}/docs/"
+          tar -C "${FULL_DIR}" -czf "dist/dockpilot_${VERSION}_${SUFFIX}.tar.gz" .
+
+      - name: Upload server artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockpilot-server_${{ needs.resolve-release.outputs.clean_version }}_${{ matrix.suffix }}
           path: dist/*.tar.gz
           if-no-files-found: error
 
   publish-release:
     name: Publish GitHub release
-    needs: build-binaries
+    needs:
+      - resolve-release
+      - build-agent-binaries
+      - build-server-binaries
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve version
-        id: vars
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.version }}"
-          fi
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -178,7 +249,7 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.vars.outputs.tag }}
+          TAG: ${{ needs.resolve-release.outputs.tag }}
         run: |
           set -euo pipefail
           gh release create "${TAG}" dist/*.tar.gz \
@@ -186,26 +257,15 @@ jobs:
             --title "DockPilot ${TAG}" \
             --generate-notes
 
-  publish-images:
-    name: Publish GHCR images
-    needs: build-binaries
+  publish-server-image:
+    name: Publish server image
+    needs:
+      - resolve-release
+      - validate-public-content
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Resolve version
-        id: vars
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.version }}"
-          fi
-          CLEAN_VERSION="${TAG#v}"
-          BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "clean_version=${CLEAN_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -228,13 +288,36 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.SERVER_IMAGE }}:${{ steps.vars.outputs.tag }}
-            ${{ env.SERVER_IMAGE }}:${{ steps.vars.outputs.clean_version }}
+            ${{ env.SERVER_IMAGE }}:${{ needs.resolve-release.outputs.tag }}
+            ${{ env.SERVER_IMAGE }}:${{ needs.resolve-release.outputs.clean_version }}
             ${{ env.SERVER_IMAGE }}:latest
           build-args: |
-            VERSION=${{ steps.vars.outputs.clean_version }}
+            VERSION=${{ needs.resolve-release.outputs.clean_version }}
             COMMIT=${{ github.sha }}
-            BUILD_DATE=${{ steps.vars.outputs.build_date }}
+            BUILD_DATE=${{ needs.resolve-release.outputs.build_date }}
+
+  publish-agent-image:
+    name: Publish agent image
+    needs:
+      - resolve-release
+      - validate-public-content
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push agent image
         uses: docker/build-push-action@v6
@@ -244,10 +327,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.AGENT_IMAGE }}:${{ steps.vars.outputs.tag }}
-            ${{ env.AGENT_IMAGE }}:${{ steps.vars.outputs.clean_version }}
+            ${{ env.AGENT_IMAGE }}:${{ needs.resolve-release.outputs.tag }}
+            ${{ env.AGENT_IMAGE }}:${{ needs.resolve-release.outputs.clean_version }}
             ${{ env.AGENT_IMAGE }}:latest
           build-args: |
-            VERSION=${{ steps.vars.outputs.clean_version }}
+            VERSION=${{ needs.resolve-release.outputs.clean_version }}
             COMMIT=${{ github.sha }}
-            BUILD_DATE=${{ steps.vars.outputs.build_date }}
+            BUILD_DATE=${{ needs.resolve-release.outputs.build_date }}

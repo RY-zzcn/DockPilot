@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -108,13 +109,22 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 	}
 	images, err := composeImages(ctx, path)
 	if err != nil {
+		runtimeImages := composeRuntimeImages(ctx, name)
+		if len(runtimeImages) == 0 {
+			detection.Error = err.Error()
+			return detection, err
+		}
 		detection.Error = err.Error()
-		return detection, err
+		images = runtimeImages
+		logLine("Compose config check failed; falling back to images from existing project containers: " + err.Error())
+	} else {
+		images = mergeImageReferences(images, composeRuntimeImages(ctx, name))
 	}
 	if len(images) == 0 {
 		logLine("No image references found in compose config: " + path)
 		return detection, nil
 	}
+	logLine(fmt.Sprintf("Checking %d image reference(s) for compose project: %s", len(images), path))
 	detector := t.Detector
 	if detector == nil {
 		detector = NewUpdateDetector(0)
@@ -136,7 +146,12 @@ func (t TaskExecutor) detectComposeProject(ctx context.Context, projectID, name,
 		}
 	}
 	if failedImages > 0 {
-		detection.Error = fmt.Sprintf("%d image update checks failed", failedImages)
+		imageError := fmt.Sprintf("%d image update checks failed", failedImages)
+		if detection.Error != "" {
+			detection.Error += "; " + imageError
+		} else {
+			detection.Error = imageError
+		}
 	}
 	return detection, nil
 }
@@ -243,20 +258,41 @@ func runLoggedInDir(ctx context.Context, dir string, logLine func(string), name 
 
 func composeImages(ctx context.Context, path string) ([]string, error) {
 	path = composeFilePath(path)
-	args := append([]string{"compose"}, composeFileArgs(path)...)
-	args = append(args, "config", "--images")
-	out, err := commandStdoutInDir(ctx, composeProjectDir(path), "docker", args...)
+	projectDir := composeProjectDir(path)
+	jsonArgs := append([]string{"compose"}, composeFileArgs(path)...)
+	jsonArgs = append(jsonArgs, "config", "--format", "json")
+	jsonOut, jsonErr := commandStdoutInDir(ctx, projectDir, "docker", jsonArgs...)
+	if jsonErr == nil {
+		if images, ok := parseComposeConfigImages(jsonOut); ok {
+			return images, nil
+		}
+	}
+
+	imageArgs := append([]string{"compose"}, composeFileArgs(path)...)
+	imageArgs = append(imageArgs, "config", "--images")
+	out, err := commandStdoutInDir(ctx, projectDir, "docker", imageArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("read compose images: %w: %s", err, strings.TrimSpace(out))
+		if jsonErr != nil && strings.TrimSpace(jsonOut) != "" {
+			return nil, fmt.Errorf("read compose config: %w: %s", jsonErr, compactOutput(jsonOut))
+		}
+		return nil, fmt.Errorf("read compose images: %w: %s", err, compactOutput(out))
 	}
 	return parseComposeImages(out), nil
 }
 
-func parseComposeImages(out string) []string {
+func parseComposeConfigImages(out string) ([]string, bool) {
+	var config struct {
+		Services map[string]struct {
+			Image string `json:"image"`
+		} `json:"services"`
+	}
+	if err := json.Unmarshal([]byte(out), &config); err != nil {
+		return nil, false
+	}
 	seen := map[string]bool{}
 	var images []string
-	for _, line := range strings.Split(out, "\n") {
-		image := strings.TrimSpace(line)
+	for _, service := range config.Services {
+		image := strings.TrimSpace(service.Image)
 		if image == "" || seen[image] || !isComposeImageReference(image) {
 			continue
 		}
@@ -264,7 +300,40 @@ func parseComposeImages(out string) []string {
 		images = append(images, image)
 	}
 	sort.Strings(images)
+	return images, true
+}
+
+func composeRuntimeImages(ctx context.Context, projectName string) []string {
+	projectName = strings.TrimSpace(projectName)
+	if projectName == "" {
+		return nil
+	}
+	out, err := commandStdout(ctx, "docker", "ps", "-a", "--filter", "label=com.docker.compose.project="+projectName, "--format", "{{.Image}}")
+	if err != nil {
+		return nil
+	}
+	return parseComposeImages(out)
+}
+
+func mergeImageReferences(groups ...[]string) []string {
+	seen := map[string]bool{}
+	var images []string
+	for _, group := range groups {
+		for _, image := range group {
+			image = strings.TrimSpace(image)
+			if image == "" || seen[image] || !isComposeImageReference(image) {
+				continue
+			}
+			seen[image] = true
+			images = append(images, image)
+		}
+	}
+	sort.Strings(images)
 	return images
+}
+
+func parseComposeImages(out string) []string {
+	return mergeImageReferences(strings.Split(out, "\n"))
 }
 
 func isComposeImageReference(value string) bool {

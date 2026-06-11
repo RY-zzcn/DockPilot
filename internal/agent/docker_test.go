@@ -76,6 +76,82 @@ redis
 	}
 }
 
+func TestParseComposeConfigImages(t *testing.T) {
+	out := `{
+  "services": {
+    "api": {"image": "ghcr.io/example/api:latest"},
+    "worker": {"image": "nginx:stable"},
+    "duplicate": {"image": "nginx:stable"},
+    "build_only": {"build": "."}
+  }
+}`
+	images, ok := parseComposeConfigImages(out)
+	if !ok {
+		t.Fatalf("compose config json should parse")
+	}
+	want := []string{"ghcr.io/example/api:latest", "nginx:stable"}
+	if len(images) != len(want) {
+		t.Fatalf("parseComposeConfigImages length = %d, want %d: %#v", len(images), len(want), images)
+	}
+	for i := range want {
+		if images[i] != want[i] {
+			t.Fatalf("parseComposeConfigImages[%d] = %q, want %q", i, images[i], want[i])
+		}
+	}
+	if _, ok := parseComposeConfigImages("not json"); ok {
+		t.Fatalf("invalid json should not parse")
+	}
+}
+
+func TestMergeImageReferencesDedupesAndFilters(t *testing.T) {
+	images := mergeImageReferences(
+		[]string{"nginx:stable", "level=warning", "nginx:stable"},
+		[]string{"ghcr.io/example/api:latest", "https://example.invalid/image"},
+	)
+	want := []string{"ghcr.io/example/api:latest", "nginx:stable"}
+	if len(images) != len(want) {
+		t.Fatalf("mergeImageReferences length = %d, want %d: %#v", len(images), len(want), images)
+	}
+	for i := range want {
+		if images[i] != want[i] {
+			t.Fatalf("mergeImageReferences[%d] = %q, want %q", i, images[i], want[i])
+		}
+	}
+}
+
+func TestComposeProjectsFromDirsSkipsNoisyDirs(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noisyDir := filepath.Join(root, "node_modules", "ignored")
+	if err := os.MkdirAll(noisyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(noisyDir, "compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hiddenDir := filepath.Join(root, ".hidden")
+	if err := os.MkdirAll(hiddenDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hiddenDir, "compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projects := DockerClient{ComposeDirs: []string{root}}.composeProjectsFromDirs(context.Background())
+	if len(projects) != 1 {
+		t.Fatalf("composeProjectsFromDirs length = %d, want 1: %#v", len(projects), projects)
+	}
+	if projects[0].Name != "app" || projects[0].Path != filepath.Join(appDir, "compose.yml") {
+		t.Fatalf("unexpected project: %#v", projects[0])
+	}
+}
+
 func TestParseContainerManifestDigests(t *testing.T) {
 	arrayOutput := `[{"ImageManifestDescriptor":{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]`
 	objectOutput := `{"ImageManifestDescriptor":{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}`

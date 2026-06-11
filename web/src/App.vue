@@ -1,9 +1,12 @@
 <template>
   <main v-if="!token" class="login-page">
     <form class="login-panel" @submit.prevent="login">
-      <div>
-        <p class="eyebrow">DockPilot</p>
-        <h1>Docker 节点管理</h1>
+      <div class="login-brand">
+        <div class="brand-mark">D</div>
+        <div>
+          <p class="eyebrow">DockPilot</p>
+          <h1>Docker 运维控制台</h1>
+        </div>
       </div>
       <label>
         <span>用户名</span>
@@ -30,28 +33,43 @@
           <span>{{ user?.username }} · v{{ versionInfo.version }}</span>
         </div>
       </div>
+
       <nav class="nav-list">
-        <button :class="{ active: activeView === 'dashboard' }" title="仪表盘" @click="activeView = 'dashboard'">
-          <LayoutDashboard :size="18" />
-          仪表盘
-        </button>
-        <button :class="{ active: activeView === 'nodes' }" title="节点" @click="activeView = 'nodes'">
-          <Server :size="18" />
-          节点
-        </button>
-        <button :class="{ active: activeView === 'updates' }" title="更新中心" @click="activeView = 'updates'">
-          <RefreshCw :size="18" />
-          更新中心
-        </button>
-        <button :class="{ active: activeView === 'tasks' }" title="任务" @click="activeView = 'tasks'">
-          <ClipboardList :size="18" />
-          任务
-        </button>
-        <button :class="{ active: activeView === 'settings' }" title="设置" @click="activeView = 'settings'">
-          <Settings :size="18" />
-          设置
-        </button>
+        <div class="nav-group">
+          <p>运行态</p>
+          <button :class="{ active: activeView === 'dashboard' }" title="总览" @click="activeView = 'dashboard'">
+            <LayoutDashboard :size="18" />
+            总览
+          </button>
+          <button :class="{ active: activeView === 'nodes' }" title="节点" @click="activeView = 'nodes'">
+            <Server :size="18" />
+            节点
+          </button>
+          <button :class="{ active: activeView === 'projects' }" title="项目" @click="activeView = 'projects'">
+            <FileCode2 :size="18" />
+            项目
+          </button>
+        </div>
+        <div class="nav-group">
+          <p>自动化</p>
+          <button :class="{ active: activeView === 'updates' }" title="更新" @click="activeView = 'updates'">
+            <RefreshCw :size="18" />
+            更新
+          </button>
+          <button :class="{ active: activeView === 'tasks' }" title="任务" @click="activeView = 'tasks'">
+            <ClipboardList :size="18" />
+            任务
+          </button>
+        </div>
+        <div class="nav-group">
+          <p>系统</p>
+          <button :class="{ active: activeView === 'settings' }" title="设置" @click="activeView = 'settings'">
+            <Settings :size="18" />
+            设置
+          </button>
+        </div>
       </nav>
+
       <button class="ghost bottom-action" title="退出" @click="logout">
         <LogOut :size="18" />
         退出
@@ -60,15 +78,14 @@
 
     <section class="main">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">{{ viewTitle }}</p>
-          <h1>{{ selectedNode?.name || '多节点 Docker 管理' }}</h1>
+        <div class="title-block">
+          <p class="eyebrow">{{ viewSection }}</p>
+          <h1>{{ viewTitle }}</h1>
         </div>
         <div class="top-actions">
           <div class="time-chip">
             <Clock3 :size="16" />
             <span>{{ currentClock }}</span>
-            <small>北京时间</small>
           </div>
           <div class="theme-picker" title="界面主题">
             <button class="theme-trigger" type="button" @click="themeMenuOpen = !themeMenuOpen">
@@ -93,7 +110,7 @@
               {{ node.name }}
             </option>
           </select>
-          <button class="icon-button" title="刷新" @click="refreshAll">
+          <button class="icon-button" title="刷新" :disabled="isPending('refresh')" @click="manualRefresh">
             <RefreshCw :size="18" />
           </button>
         </div>
@@ -104,164 +121,151 @@
       <section v-if="activeView === 'dashboard'" class="view-stack">
         <div class="metric-grid">
           <article class="metric-card">
-            <span>在线节点</span>
+            <div>
+              <Server :size="18" />
+              <span>在线节点</span>
+            </div>
             <strong>{{ overview.nodes_online }}/{{ overview.nodes_total }}</strong>
           </article>
           <article class="metric-card">
-            <span>容器</span>
+            <div>
+              <Box :size="18" />
+              <span>容器</span>
+            </div>
             <strong>{{ overview.containers_total }}</strong>
           </article>
           <article class="metric-card warn">
-            <span>可更新</span>
+            <div>
+              <RefreshCw :size="18" />
+              <span>可更新</span>
+            </div>
             <strong>{{ overview.updates_available }}</strong>
           </article>
           <article class="metric-card danger">
-            <span>失败任务</span>
+            <div>
+              <AlertTriangle :size="18" />
+              <span>失败任务</span>
+            </div>
             <strong>{{ overview.failed_tasks }}</strong>
           </article>
         </div>
 
-        <div class="telemetry-grid">
-          <article class="telemetry-card">
-            <div>
-              <Cpu :size="18" />
-              <span>CPU</span>
+        <div class="dashboard-grid">
+          <section class="surface span-2">
+            <div class="surface-head">
+              <h2>节点运行态</h2>
+              <button class="secondary" :disabled="!isAdmin || onlineNodes.length === 0 || isPending('detect-all')" @click="detectAllNodes">
+                <Search :size="18" />
+                全部检测
+              </button>
             </div>
-            <strong>{{ formatPercent(overview.last_metric.cpu_percent) }}</strong>
-            <div class="meter"><span :style="{ width: clampPercent(overview.last_metric.cpu_percent) + '%' }"></span></div>
-          </article>
-          <article class="telemetry-card">
-            <div>
-              <MemoryStick :size="18" />
-              <span>内存</span>
-            </div>
-            <strong>{{ formatPercent(memoryPercent) }}</strong>
-            <small>{{ formatBytes(overview.last_metric.memory_used) }} / {{ formatBytes(overview.last_metric.memory_total) }}</small>
-            <div class="meter"><span :style="{ width: clampPercent(memoryPercent) + '%' }"></span></div>
-          </article>
-          <article class="telemetry-card">
-            <div>
-              <HardDrive :size="18" />
-              <span>磁盘</span>
-            </div>
-            <strong>{{ formatPercent(diskPercent) }}</strong>
-            <small>{{ formatBytes(overview.last_metric.disk_used) }} / {{ formatBytes(overview.last_metric.disk_total) }}</small>
-            <div class="meter"><span :style="{ width: clampPercent(diskPercent) + '%' }"></span></div>
-          </article>
-          <article class="telemetry-card">
-            <div>
-              <Network :size="18" />
-              <span>网络</span>
-            </div>
-            <strong>{{ formatBytes(overview.last_metric.network_rx + overview.last_metric.network_tx) }}</strong>
-            <small>RX {{ formatBytes(overview.last_metric.network_rx) }} / TX {{ formatBytes(overview.last_metric.network_tx) }}</small>
-            <div class="meter accent"><span :style="{ width: '64%' }"></span></div>
-          </article>
-        </div>
-
-        <div class="split">
-          <section class="panel">
-            <div class="panel-head">
-              <h2>节点状态</h2>
-              <Server :size="18" />
-            </div>
-            <div class="node-list">
+            <div class="node-table">
               <button
                 v-for="node in nodes"
                 :key="node.id"
-                class="node-row"
+                class="node-line"
                 :class="{ selected: node.id === selectedNodeId }"
-                @click="selectedNodeId = node.id"
+                @click="selectNode(node.id, 'nodes')"
               >
                 <span class="status-dot" :class="node.status"></span>
-                <span>{{ node.name }}</span>
-                <small>{{ node.docker_version || 'Docker -' }} · Agent {{ node.version || '-' }}</small>
+                <strong>{{ node.name }}</strong>
+                <span>{{ node.os || '-' }}/{{ node.arch || '-' }}</span>
+                <span>{{ node.docker_version || 'Docker -' }}</span>
+                <em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em>
               </button>
             </div>
           </section>
 
-          <section class="panel">
-            <div class="panel-head">
-              <h2>最近任务</h2>
-              <ClipboardList :size="18" />
+          <section class="surface">
+            <div class="surface-head">
+              <h2>资源</h2>
+              <Activity :size="18" />
             </div>
-            <div class="task-list compact">
-              <button v-for="task in tasks.slice(0, 8)" :key="task.id" class="task-row" @click="openTask(task)">
-                <span class="badge" :class="task.status">{{ task.status }}</span>
-                <span>{{ task.kind }}</span>
-                <small>{{ task.node_id }}</small>
+            <div class="telemetry-list">
+              <div class="telemetry-line">
+                <Cpu :size="18" />
+                <span>CPU</span>
+                <strong>{{ formatPercent(overview.last_metric.cpu_percent) }}</strong>
+                <div class="meter"><span :style="{ width: clampPercent(overview.last_metric.cpu_percent) + '%' }"></span></div>
+              </div>
+              <div class="telemetry-line">
+                <MemoryStick :size="18" />
+                <span>内存</span>
+                <strong>{{ formatPercent(memoryPercent) }}</strong>
+                <div class="meter"><span :style="{ width: clampPercent(memoryPercent) + '%' }"></span></div>
+              </div>
+              <div class="telemetry-line">
+                <HardDrive :size="18" />
+                <span>磁盘</span>
+                <strong>{{ formatPercent(diskPercent) }}</strong>
+                <div class="meter"><span :style="{ width: clampPercent(diskPercent) + '%' }"></span></div>
+              </div>
+              <div class="telemetry-line">
+                <Network :size="18" />
+                <span>网络</span>
+                <strong>{{ formatBytes(overview.last_metric.network_rx + overview.last_metric.network_tx) }}</strong>
+                <div class="meter accent"><span :style="{ width: '64%' }"></span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="surface">
+            <div class="surface-head">
+              <h2>任务队列</h2>
+              <button class="ghost small-action" @click="activeView = 'tasks'">
+                <ClipboardList :size="16" />
+                查看
+              </button>
+            </div>
+            <div class="compact-list">
+              <button v-for="task in tasks.slice(0, 7)" :key="task.id" class="task-line" @click="openTask(task)">
+                <span class="badge" :class="task.status">{{ statusText(task.status) }}</span>
+                <strong>{{ taskTitle(task.kind) }}</strong>
+                <small>{{ taskNodeName(task.node_id) }}</small>
               </button>
             </div>
           </section>
         </div>
       </section>
 
-      <section v-if="activeView === 'nodes'" class="view-stack">
-        <div class="split">
-          <section class="panel">
-            <div class="panel-head">
-              <h2>节点</h2>
-              <Server :size="18" />
-            </div>
-            <div class="node-list">
-              <button
-                v-for="node in nodes"
-                :key="node.id"
-                class="node-row"
-                :class="{ selected: node.id === selectedNodeId }"
-                @click="selectedNodeId = node.id"
-              >
-                <span class="status-dot" :class="node.status"></span>
-                <span>{{ node.name }}</span>
-                <small>{{ node.os }}/{{ node.arch }} · {{ agentVersionLabel(node) }}</small>
-              </button>
-            </div>
-          </section>
+      <section v-if="activeView === 'nodes'" class="workbench">
+        <aside class="node-rail surface">
+          <div class="surface-head">
+            <h2>节点</h2>
+            <span class="count-chip">{{ filteredNodes.length }}</span>
+          </div>
+          <label class="search-field">
+            <Search :size="16" />
+            <input v-model="nodeSearch" placeholder="搜索节点" />
+          </label>
+          <div class="node-list">
+            <button
+              v-for="node in filteredNodes"
+              :key="node.id"
+              class="node-card"
+              :class="{ selected: node.id === selectedNodeId }"
+              @click="selectNode(node.id)"
+            >
+              <span class="status-dot" :class="node.status"></span>
+              <strong>{{ node.name }}</strong>
+              <small>{{ node.os || '-' }}/{{ node.arch || '-' }}</small>
+              <em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em>
+            </button>
+          </div>
+        </aside>
 
-          <section class="panel">
-            <div class="panel-head">
-              <h2>Docker</h2>
-              <Terminal :size="18" />
+        <section class="node-workspace">
+          <section class="surface node-summary">
+            <div>
+              <p class="eyebrow">{{ selectedNode?.status || '未选择' }}</p>
+              <h2>{{ selectedNode?.name || '选择节点' }}</h2>
             </div>
-            <div class="fact-grid">
-              <span>Docker</span>
-              <strong>{{ selectedNode?.docker_version || '-' }}</strong>
-              <span>Compose</span>
-              <strong>{{ selectedNode?.compose_version || '-' }}</strong>
-              <span>Agent</span>
-              <strong>{{ selectedNode?.version ? `v${selectedNode.version}` : '-' }}</strong>
-              <span>版本状态</span>
-              <strong>
-                <em v-if="selectedNode" :class="agentVersionBadgeClass(selectedNode)">{{ agentVersionLabel(selectedNode) }}</em>
-                <span v-else>-</span>
-              </strong>
-              <span>最近心跳</span>
-              <strong>{{ selectedNode?.last_seen || '-' }}</strong>
-              <span>备注</span>
-              <strong>{{ selectedNode?.note || '-' }}</strong>
+            <div class="summary-facts">
+              <span>Docker <strong>{{ selectedNode?.docker_version || '-' }}</strong></span>
+              <span>Compose <strong>{{ selectedNode?.compose_version || '-' }}</strong></span>
+              <span>Agent <strong>{{ selectedNode?.version ? `v${selectedNode.version}` : '-' }}</strong></span>
+              <span>心跳 <strong>{{ selectedNode?.last_seen || '-' }}</strong></span>
             </div>
-            <form class="form-stack compact-form" @submit.prevent="saveNode">
-              <div class="form-grid">
-                <label>
-                  <span>节点名称</span>
-                  <input v-model="nodeForm.name" :disabled="!selectedNodeId || !isAdmin" />
-                </label>
-                <label>
-                  <span>备注</span>
-                  <input v-model="nodeForm.note" :disabled="!selectedNodeId || !isAdmin" />
-                </label>
-              </div>
-              <div class="button-row">
-                <button class="primary" :disabled="!selectedNodeId || !isAdmin">
-                  <Save :size="18" />
-                  保存节点
-                </button>
-                <button class="secondary danger-action" type="button" :disabled="!selectedNodeId || !isAdmin" @click="deleteNode">
-                  <Trash2 :size="18" />
-                  删除节点
-                </button>
-              </div>
-            </form>
             <div class="button-row">
               <button class="secondary" :disabled="!selectedNodeId || !isAdmin" @click="createNodeTask('detect_updates')">
                 <Search :size="18" />
@@ -277,98 +281,261 @@
               </button>
             </div>
           </section>
-        </div>
 
-        <section class="panel">
-          <div class="panel-head">
-            <h2>容器</h2>
-            <Box :size="18" />
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>名称</th>
-                  <th>镜像</th>
-                  <th>状态</th>
-                  <th>Compose</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="container in dockerState.containers" :key="container.id">
-                  <td>{{ container.name }}</td>
-                  <td>{{ container.image }}</td>
-                  <td><span class="badge" :class="container.state">{{ container.state }}</span></td>
-                  <td>{{ container.compose_project || '-' }}</td>
-                  <td>
-                    <button
-                      class="icon-button"
-                      title="重启容器"
-                      :disabled="!isAdmin"
-                      @click="createNodeTask('restart_container', 'container', container.id)"
-                    >
-                      <RotateCcw :size="16" />
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Compose</h2>
-            <FileCode2 :size="18" />
-          </div>
-          <div class="compose-grid">
-            <button
-              v-for="project in dockerState.compose_projects"
-              :key="project.id"
-              class="compose-item"
-              :class="{ selected: composeForm.id === project.id }"
-              @click="editCompose(project)"
-            >
-              <strong>{{ project.name }}</strong>
-              <span>{{ project.path }}</span>
-              <em :class="detectionBadgeClass(project)">{{ detectionLabel(project) }}</em>
-              <small v-if="detectionMeta(project)">{{ detectionMeta(project) }}</small>
+          <div class="tabbar">
+            <button :class="{ active: nodeDetailTab === 'containers' }" @click="nodeDetailTab = 'containers'">
+              <Box :size="16" />
+              容器
+            </button>
+            <button :class="{ active: nodeDetailTab === 'images' }" @click="nodeDetailTab = 'images'">
+              <Package :size="16" />
+              镜像
+            </button>
+            <button :class="{ active: nodeDetailTab === 'compose' }" @click="nodeDetailTab = 'compose'">
+              <FileCode2 :size="16" />
+              Compose
+            </button>
+            <button :class="{ active: nodeDetailTab === 'profile' }" @click="nodeDetailTab = 'profile'">
+              <SlidersHorizontal :size="16" />
+              信息
             </button>
           </div>
-          <form class="compose-editor" @submit.prevent="saveCompose">
-            <div class="form-grid">
-              <label>
-                <span>名称</span>
-                <input v-model="composeForm.name" :disabled="!isAdmin" />
-              </label>
-              <label>
-                <span>路径</span>
-                <input v-model="composeForm.path" :disabled="!isAdmin" />
-              </label>
+
+          <section v-if="nodeDetailTab === 'containers'" class="surface">
+            <div class="surface-head">
+              <h2>容器</h2>
+              <div class="inline-tools">
+                <label class="search-field compact-search">
+                  <Search :size="16" />
+                  <input v-model="containerSearch" placeholder="名称 / 镜像 / Compose" />
+                </label>
+                <div class="segmented compact-segmented">
+                  <button :class="{ active: containerStateFilter === 'all' }" @click="containerStateFilter = 'all'">全部</button>
+                  <button :class="{ active: containerStateFilter === 'running' }" @click="containerStateFilter = 'running'">运行</button>
+                  <button :class="{ active: containerStateFilter === 'stopped' }" @click="containerStateFilter = 'stopped'">停止</button>
+                  <button :class="{ active: containerStateFilter === 'updates' }" @click="containerStateFilter = 'updates'">更新</button>
+                </div>
+              </div>
             </div>
-            <textarea v-model="composeForm.content" :disabled="!isAdmin" spellcheck="false"></textarea>
-            <div class="button-row">
-              <label class="checkline">
-                <input v-model="composeForm.deploy_now" type="checkbox" :disabled="!isAdmin" />
-                立即部署
-              </label>
-              <button class="secondary" type="button" :disabled="!isAdmin" @click="newCompose">
+            <div class="data-table">
+              <div class="table-row table-head">
+                <span>名称</span>
+                <span>镜像</span>
+                <span>状态</span>
+                <span>Compose</span>
+                <span></span>
+              </div>
+              <div v-for="container in filteredContainers" :key="container.id" class="table-row">
+                <strong>{{ container.name }}</strong>
+                <span>{{ container.image }}</span>
+                <span><em class="badge" :class="container.state">{{ container.state }}</em></span>
+                <span>{{ container.compose_project || '-' }}</span>
+                <span class="row-actions">
+                  <button
+                    class="icon-button"
+                    title="重启容器"
+                    :disabled="!isAdmin"
+                    @click="createNodeTask('restart_container', 'container', container.id)"
+                  >
+                    <RotateCcw :size="16" />
+                  </button>
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="nodeDetailTab === 'images'" class="surface">
+            <div class="surface-head">
+              <h2>镜像</h2>
+              <span class="count-chip">{{ dockerState.images.length }}</span>
+            </div>
+            <div class="data-table image-table">
+              <div class="table-row table-head">
+                <span>仓库</span>
+                <span>标签</span>
+                <span>大小</span>
+                <span>创建时间</span>
+              </div>
+              <div v-for="image in dockerState.images" :key="image.id + image.repository + image.tag" class="table-row">
+                <strong>{{ image.repository }}</strong>
+                <span>{{ image.tag }}</span>
+                <span>{{ image.size }}</span>
+                <span>{{ image.created_at }}</span>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="nodeDetailTab === 'compose'" class="surface">
+            <div class="surface-head">
+              <h2>Compose</h2>
+              <button class="secondary" :disabled="!isAdmin" @click="newCompose">
                 <Plus :size="18" />
                 新建
               </button>
-              <button class="primary" type="submit" :disabled="!selectedNodeId || !isAdmin">
-                <Save :size="18" />
-                保存
+            </div>
+            <div class="project-strip">
+              <button v-for="project in dockerState.compose_projects" :key="project.id" class="project-pill" @click="openProject(project)">
+                <strong>{{ project.name }}</strong>
+                <span>{{ project.path }}</span>
+                <em :class="detectionBadgeClass(project)">{{ detectionLabel(project) }}</em>
               </button>
             </div>
-          </form>
+          </section>
+
+          <section v-if="nodeDetailTab === 'profile'" class="surface">
+            <div class="surface-head">
+              <h2>节点信息</h2>
+              <Save :size="18" />
+            </div>
+            <form class="form-stack" @submit.prevent="saveNode">
+              <div class="form-grid">
+                <label>
+                  <span>节点名称</span>
+                  <input v-model="nodeForm.name" :disabled="!selectedNodeId || !isAdmin" />
+                </label>
+                <label>
+                  <span>备注</span>
+                  <input v-model="nodeForm.note" :disabled="!selectedNodeId || !isAdmin" />
+                </label>
+              </div>
+              <div class="button-row">
+                <button class="primary" :disabled="!selectedNodeId || !isAdmin">
+                  <Save :size="18" />
+                  保存
+                </button>
+                <button class="secondary danger-action" type="button" :disabled="!selectedNodeId || !isAdmin" @click="deleteNode">
+                  <Trash2 :size="18" />
+                  删除
+                </button>
+              </div>
+            </form>
+          </section>
         </section>
       </section>
 
+      <section v-if="activeView === 'projects'" class="view-stack">
+        <section class="surface">
+          <div class="surface-head">
+            <h2>项目</h2>
+            <div class="inline-tools">
+              <label class="search-field compact-search">
+                <Search :size="16" />
+                <input v-model="projectSearch" placeholder="搜索项目 / 路径" />
+              </label>
+              <div class="segmented compact-segmented">
+                <button :class="{ active: projectFilter === 'all' }" @click="projectFilter = 'all'">全部</button>
+                <button :class="{ active: projectFilter === 'updates' }" @click="projectFilter = 'updates'">可更新</button>
+                <button :class="{ active: projectFilter === 'failed' }" @click="projectFilter = 'failed'">异常</button>
+                <button :class="{ active: projectFilter === 'current' }" @click="projectFilter = 'current'">正常</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="project-layout">
+          <section class="surface project-list-panel">
+            <div class="project-list">
+              <button
+                v-for="project in filteredProjects"
+                :key="project.id"
+                class="project-row"
+                :class="{ selected: project.id === selectedProjectId }"
+                @click="selectCompose(project)"
+              >
+                <strong>{{ project.name }}</strong>
+                <span>{{ project.path }}</span>
+                <em :class="detectionBadgeClass(project)">{{ detectionLabel(project) }}</em>
+                <small v-if="detectionMeta(project)">{{ detectionMeta(project) }}</small>
+              </button>
+            </div>
+          </section>
+
+          <section class="surface project-editor-panel">
+            <div class="surface-head">
+              <h2>{{ composeForm.name || 'Compose' }}</h2>
+              <div class="button-row compact-actions">
+                <button class="secondary" type="button" :disabled="!isAdmin" @click="newCompose">
+                  <Plus :size="18" />
+                  新建
+                </button>
+                <button class="secondary" type="button" :disabled="!selectedProject || !isAdmin" @click="createSelectedProjectTask('detect_updates')">
+                  <Search :size="18" />
+                  检测
+                </button>
+                <button class="secondary" type="button" :disabled="!selectedProject || !isAdmin" @click="createSelectedProjectTask('compose_update')">
+                  <Play :size="18" />
+                  更新
+                </button>
+              </div>
+            </div>
+            <div v-if="selectedProject" class="project-meta">
+              <span><strong>状态</strong><em :class="detectionBadgeClass(selectedProject)">{{ detectionLabel(selectedProject) }}</em></span>
+              <span><strong>检测</strong>{{ detectionMeta(selectedProject) || '-' }}</span>
+              <span v-if="selectedProject.detection_error" class="error-text"><strong>错误</strong>{{ selectedProject.detection_error }}</span>
+            </div>
+            <form class="compose-editor" @submit.prevent="saveCompose">
+              <div class="form-grid">
+                <label>
+                  <span>名称</span>
+                  <input v-model="composeForm.name" :disabled="!isAdmin" />
+                </label>
+                <label>
+                  <span>路径</span>
+                  <input v-model="composeForm.path" :disabled="!isAdmin" />
+                </label>
+              </div>
+              <textarea v-model="composeForm.content" :disabled="!isAdmin" spellcheck="false"></textarea>
+              <div class="button-row">
+                <label class="checkline">
+                  <input v-model="composeForm.deploy_now" type="checkbox" :disabled="!isAdmin" />
+                  立即部署
+                </label>
+                <button class="primary" type="submit" :disabled="!selectedNodeId || !isAdmin">
+                  <Save :size="18" />
+                  保存
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </section>
+
       <section v-if="activeView === 'updates'" class="view-stack">
-        <section class="panel">
-          <div class="panel-head">
+        <div class="metric-grid compact-metrics">
+          <article class="metric-card">
+            <div>
+              <Shield :size="18" />
+              <span>Server</span>
+            </div>
+            <strong>v{{ versionInfo.version }}</strong>
+            <em :class="releaseStatusClass">{{ releaseStatusText }}</em>
+          </article>
+          <article class="metric-card">
+            <div>
+              <RefreshCw :size="18" />
+              <span>最新发布</span>
+            </div>
+            <strong>{{ latestReleaseLabel }}</strong>
+            <small>{{ versionInfo.release?.published_at || '-' }}</small>
+          </article>
+          <article class="metric-card warn">
+            <div>
+              <Package :size="18" />
+              <span>项目更新</span>
+            </div>
+            <strong>{{ updateProjects.length }}</strong>
+          </article>
+          <article class="metric-card danger">
+            <div>
+              <AlertTriangle :size="18" />
+              <span>检测异常</span>
+            </div>
+            <strong>{{ failedProjects.length }}</strong>
+          </article>
+        </div>
+
+        <section class="surface">
+          <div class="surface-head">
             <h2>策略</h2>
             <Shield :size="18" />
           </div>
@@ -384,14 +551,17 @@
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
+        <section class="surface">
+          <div class="surface-head">
             <h2>Compose 更新</h2>
-            <RefreshCw :size="18" />
+            <button class="secondary" :disabled="!isAdmin || !selectedNodeId" @click="createNodeTask('detect_updates')">
+              <Search :size="18" />
+              检测当前节点
+            </button>
           </div>
           <div class="update-list">
             <article v-for="row in composePolicyRows" :key="row.project.id" class="update-row">
-              <div>
+              <div class="update-main">
                 <strong>{{ row.project.name }}</strong>
                 <span>{{ row.project.path }}</span>
                 <em :class="detectionBadgeClass(row.project)">{{ detectionLabel(row.project) }}</em>
@@ -409,31 +579,51 @@
                 <button class="icon-button" title="保存策略" :disabled="!isAdmin" @click="savePolicy(row.policy)">
                   <Save :size="16" />
                 </button>
-                <button
-                  class="icon-button"
-                  title="检测更新"
-                  :disabled="!isAdmin"
-                  @click="createProjectTask('detect_updates', row.project)"
-                >
+                <button class="icon-button" title="检测更新" :disabled="!isAdmin" @click="createProjectTask('detect_updates', row.project)">
                   <Search :size="16" />
                 </button>
-                <button
-                  class="icon-button"
-                  title="执行更新"
-                  :disabled="!isAdmin"
-                  @click="createProjectTask('compose_update', row.project)"
-                >
+                <button class="icon-button" title="执行更新" :disabled="!isAdmin" @click="createProjectTask('compose_update', row.project)">
                   <Play :size="16" />
                 </button>
               </div>
             </article>
           </div>
         </section>
+
+        <section class="surface">
+          <div class="surface-head">
+            <h2>Agent 版本</h2>
+            <button class="secondary" :disabled="!isAdmin || outdatedAgentCount === 0" @click="upgradeOutdatedAgents">
+              <RefreshCw :size="18" />
+              升级落后节点
+            </button>
+          </div>
+          <div class="data-table agent-table">
+            <div class="table-row table-head">
+              <span>节点</span>
+              <span>Agent</span>
+              <span>系统</span>
+              <span>状态</span>
+              <span></span>
+            </div>
+            <div v-for="node in nodes" :key="node.id" class="table-row">
+              <strong>{{ node.name }}</strong>
+              <span>{{ node.version ? `v${node.version}` : '-' }}</span>
+              <span>{{ node.os }}/{{ node.arch }}</span>
+              <span><em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em></span>
+              <span class="row-actions">
+                <button class="icon-button" title="升级 Agent" :disabled="!isAdmin || !agentCanUpdate(node)" @click="upgradeAgent(node)">
+                  <RefreshCw :size="16" />
+                </button>
+              </span>
+            </div>
+          </div>
+        </section>
       </section>
 
-      <section v-if="activeView === 'tasks'" class="view-stack">
-        <section class="panel">
-          <div class="panel-head">
+      <section v-if="activeView === 'tasks'" class="task-layout">
+        <section class="surface task-panel">
+          <div class="surface-head">
             <h2>任务</h2>
             <div class="button-row compact-actions">
               <button class="secondary" :disabled="!isAdmin" @click="clearTasksScope('failed', '失败任务')">
@@ -444,231 +634,127 @@
                 <Eraser :size="18" />
                 清除历史
               </button>
-              <ClipboardList :size="18" />
             </div>
           </div>
-          <div class="segmented task-filter">
-            <button :class="{ active: taskFilter === 'all' }" @click="taskFilter = 'all'">全部</button>
-            <button :class="{ active: taskFilter === 'active' }" @click="taskFilter = 'active'">运行中</button>
-            <button :class="{ active: taskFilter === 'failed' }" @click="taskFilter = 'failed'">失败</button>
+          <div class="task-toolbar">
+            <div class="segmented task-filter">
+              <button :class="{ active: taskFilter === 'all' }" @click="taskFilter = 'all'">全部</button>
+              <button :class="{ active: taskFilter === 'active' }" @click="taskFilter = 'active'">运行中</button>
+              <button :class="{ active: taskFilter === 'failed' }" @click="taskFilter = 'failed'">失败</button>
+            </div>
+            <div class="task-counts">
+              <span>{{ activeTasks.length }} 运行</span>
+              <span>{{ failedTasks.length }} 失败</span>
+            </div>
           </div>
           <div class="task-list">
-            <button v-for="task in visibleTasks" :key="task.id" class="task-row" @click="openTask(task)">
-              <span class="badge" :class="task.status">{{ task.status }}</span>
-              <span>{{ task.kind }}</span>
+            <button
+              v-for="task in visibleTasks"
+              :key="task.id"
+              class="task-row"
+              :class="{ selected: selectedTask?.id === task.id }"
+              @click="openTask(task)"
+            >
+              <span class="badge" :class="task.status">{{ statusText(task.status) }}</span>
+              <strong>{{ taskTitle(task.kind) }}</strong>
               <small>{{ taskMessage(task) || task.target_id || '-' }}</small>
+              <small>{{ taskNodeName(task.node_id) }}</small>
               <small>{{ task.created_at }}</small>
-              <small>{{ task.node_id }}</small>
             </button>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <h2>日志</h2>
+        <section class="surface task-detail">
+          <div class="surface-head">
+            <h2>详情</h2>
             <Terminal :size="18" />
+          </div>
+          <div class="task-meta" v-if="selectedTask">
+            <span><strong>ID</strong>{{ selectedTask.id }}</span>
+            <span><strong>节点</strong>{{ taskNodeName(selectedTask.node_id) }}</span>
+            <span><strong>状态</strong><em class="badge" :class="selectedTask.status">{{ statusText(selectedTask.status) }}</em></span>
+            <span><strong>结果</strong>{{ taskMessage(selectedTask) || '-' }}</span>
           </div>
           <pre class="logs">{{ selectedTaskLogs }}</pre>
         </section>
       </section>
 
       <section v-if="activeView === 'settings'" class="view-stack">
-        <section class="panel">
-          <div class="panel-head">
-            <h2>版本与发布</h2>
+        <section class="surface">
+          <div class="surface-head">
+            <h2>版本与运行设置</h2>
             <Shield :size="18" />
           </div>
-          <div class="fact-grid">
-            <span>Server</span>
-            <strong>v{{ versionInfo.version }}</strong>
-            <span>最新发布</span>
-            <strong>
-              <a v-if="versionInfo.release?.url" class="text-link" :href="versionInfo.release.url" target="_blank" rel="noreferrer">
-                {{ latestReleaseLabel }}
-              </a>
-              <span v-else>{{ latestReleaseLabel }}</span>
-            </strong>
-            <span>发布状态</span>
-            <strong><em :class="releaseStatusClass">{{ releaseStatusText }}</em></strong>
-            <span>发布仓库</span>
-            <strong>{{ versionInfo.release?.repository || runtimeSettings.release_repo || '-' }}</strong>
-            <span>Commit</span>
-            <strong>{{ shortCommit }}</strong>
-            <span>构建时间</span>
-            <strong>{{ versionInfo.build_date || '-' }}</strong>
-            <span>发布时间</span>
-            <strong>{{ versionInfo.release?.published_at || '-' }}</strong>
-            <span>服务时间</span>
-            <strong>{{ versionInfo.server_time || '-' }}</strong>
-            <span>时区</span>
-            <strong>{{ versionInfo.time_zone || 'Asia/Shanghai' }}</strong>
-          </div>
-          <form class="form-grid" @submit.prevent="saveRuntimeSettings">
-            <label class="checkline">
-              <input v-model="runtimeSettings.agent_auto_update" type="checkbox" :disabled="!isAdmin" />
-              Agent 自动升级
-            </label>
-            <label>
-              <span>Agent 目标版本</span>
-              <input v-model="runtimeSettings.agent_auto_update_version" :disabled="!isAdmin" placeholder="latest 或 v0.2.0" />
-            </label>
-            <label>
-              <span>扫描间隔</span>
-              <input :value="formatDuration(runtimeSettings.agent_auto_update_interval_seconds)" disabled />
-            </label>
-            <button class="primary aligned" :disabled="!isAdmin">
-              <Save :size="18" />
-              保存
-            </button>
-          </form>
-          <div class="button-row">
-            <button class="secondary" :disabled="!isAdmin || outdatedAgentCount === 0" @click="upgradeOutdatedAgents">
-              <RefreshCw :size="18" />
-              升级落后节点
-            </button>
-            <span class="muted-line">{{ outdatedAgentCount }} 个节点可升级</span>
+          <div class="settings-grid">
+            <div class="fact-grid">
+              <span>Server</span>
+              <strong>v{{ versionInfo.version }}</strong>
+              <span>最新发布</span>
+              <strong>
+                <a v-if="versionInfo.release?.url" class="text-link" :href="versionInfo.release.url" target="_blank" rel="noreferrer">
+                  {{ latestReleaseLabel }}
+                </a>
+                <span v-else>{{ latestReleaseLabel }}</span>
+              </strong>
+              <span>发布状态</span>
+              <strong><em :class="releaseStatusClass">{{ releaseStatusText }}</em></strong>
+              <span>发布仓库</span>
+              <strong>{{ versionInfo.release?.repository || runtimeSettings.release_repo || '-' }}</strong>
+              <span>Commit</span>
+              <strong>{{ shortCommit }}</strong>
+              <span>构建时间</span>
+              <strong>{{ versionInfo.build_date || '-' }}</strong>
+              <span>服务时间</span>
+              <strong>{{ versionInfo.server_time || '-' }}</strong>
+              <span>时区</span>
+              <strong>{{ versionInfo.time_zone || 'Asia/Shanghai' }}</strong>
+            </div>
+            <form class="form-stack" @submit.prevent="saveRuntimeSettings">
+              <label class="checkline">
+                <input v-model="runtimeSettings.agent_auto_update" type="checkbox" :disabled="!isAdmin" />
+                Agent 自动升级
+              </label>
+              <label>
+                <span>Agent 目标版本</span>
+                <input v-model="runtimeSettings.agent_auto_update_version" :disabled="!isAdmin" placeholder="latest 或 v0.2.0" />
+              </label>
+              <label>
+                <span>扫描间隔</span>
+                <input :value="formatDuration(runtimeSettings.agent_auto_update_interval_seconds)" disabled />
+              </label>
+              <button class="primary aligned" :disabled="!isAdmin">
+                <Save :size="18" />
+                保存
+              </button>
+            </form>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
-            <h2>节点版本</h2>
-            <Server :size="18" />
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>节点</th>
-                  <th>Agent</th>
-                  <th>系统</th>
-                  <th>状态</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="node in nodes" :key="node.id">
-                  <td>{{ node.name }}</td>
-                  <td>{{ node.version ? `v${node.version}` : '-' }}</td>
-                  <td>{{ node.os }}/{{ node.arch }}</td>
-                  <td><span :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</span></td>
-                  <td>
-                    <button class="icon-button" title="升级 Agent" :disabled="!isAdmin || !agentCanUpdate(node)" @click="upgradeAgent(node)">
-                      <RefreshCw :size="16" />
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Agent</h2>
+        <section class="surface">
+          <div class="surface-head">
+            <h2>部署命令</h2>
             <Terminal :size="18" />
           </div>
-          <div class="command-stack">
-            <div class="command-item">
+          <div class="command-grid">
+            <div v-for="item in commandItems" :key="item.label" class="command-item">
               <div class="command-title">
-                <span>交互式部署/卸载</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.interactive || '')">
+                <span>{{ item.label }}</span>
+                <button class="icon-button" title="复制" @click="copyCommand(item.value)">
                   <Copy :size="16" />
                 </button>
               </div>
-              <div class="command-box">{{ installInfo.interactive || '-' }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>Agent 二进制接入</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.agent_binary || installInfo.binary_command)">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.agent_binary || installInfo.binary_command }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>Agent Docker 接入</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.agent_docker || installInfo.docker_command)">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.agent_docker || installInfo.docker_command }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>Server Docker 部署</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.server_docker || '')">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.server_docker || '-' }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>Server 二进制部署</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.server_binary || '')">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.server_binary || '-' }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>交互式卸载</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall || '')">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.uninstall || '-' }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>仅卸载 Agent</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_agent || '')">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.uninstall_agent || '-' }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>仅卸载 Server</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_server || '')">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.uninstall_server || '-' }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>全部卸载</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_all || '')">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.uninstall_all || '-' }}</div>
-            </div>
-            <div class="command-item">
-              <div class="command-title">
-                <span>彻底卸载</span>
-                <button class="icon-button" title="复制" @click="copyCommand(installInfo.uninstall_purge || '')">
-                  <Copy :size="16" />
-                </button>
-              </div>
-              <div class="command-box">{{ installInfo.uninstall_purge || '-' }}</div>
+              <div class="command-box">{{ item.value || '-' }}</div>
             </div>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
+        <section class="surface">
+          <div class="surface-head">
             <h2>通知</h2>
             <Bell :size="18" />
           </div>
           <div class="notification-grid">
-            <button v-for="item in notifications" :key="item.id" class="compose-item" @click="editNotification(item)">
+            <button v-for="item in notifications" :key="item.id" class="project-row" @click="editNotification(item)">
               <strong>{{ item.name }}</strong>
               <span>{{ item.channel }} · {{ item.enabled ? '启用' : '停用' }}</span>
             </button>
@@ -702,8 +788,8 @@
           </form>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
+        <section class="surface">
+          <div class="surface-head">
             <h2>用户</h2>
             <Users :size="18" />
           </div>
@@ -746,6 +832,8 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
+  Activity,
+  AlertTriangle,
   Bell,
   Box,
   ClipboardList,
@@ -760,9 +848,10 @@ import {
   LogOut,
   MemoryStick,
   Network,
+  Package,
   Palette,
-  Plus,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
@@ -770,6 +859,7 @@ import {
   Server,
   Settings,
   Shield,
+  SlidersHorizontal,
   Terminal,
   Trash2,
   Users
@@ -791,9 +881,12 @@ import type {
   VersionInfo
 } from './types'
 
-type ViewName = 'dashboard' | 'nodes' | 'updates' | 'tasks' | 'settings'
-type ThemeName = 'aurora' | 'graphite' | 'ember' | 'terminal'
+type ViewName = 'dashboard' | 'nodes' | 'projects' | 'updates' | 'tasks' | 'settings'
+type ThemeName = 'operator' | 'graphite' | 'ember' | 'terminal'
 type ToastType = 'info' | 'success' | 'error'
+type NodeDetailTab = 'containers' | 'images' | 'compose' | 'profile'
+type ContainerFilter = 'all' | 'running' | 'stopped' | 'updates'
+type ProjectFilter = 'all' | 'updates' | 'failed' | 'current'
 
 interface Toast {
   id: number
@@ -803,7 +896,7 @@ interface Toast {
 
 const THEME_KEY = 'dockpilot.theme'
 const themes: { value: ThemeName; label: string }[] = [
-  { value: 'aurora', label: '极光' },
+  { value: 'operator', label: '运维' },
   { value: 'graphite', label: '石墨' },
   { value: 'ember', label: '日冕' },
   { value: 'terminal', label: '终端' }
@@ -813,15 +906,22 @@ const token = ref(getToken())
 const user = ref<AuthClaims | null>(null)
 const activeView = ref<ViewName>('dashboard')
 const themeName = ref<ThemeName>(
-  themes.some((theme) => theme.value === savedTheme) ? (savedTheme as ThemeName) : 'aurora'
+  themes.some((theme) => theme.value === savedTheme) ? (savedTheme as ThemeName) : 'operator'
 )
 const themeMenuOpen = ref(false)
 const busy = ref(false)
 const error = ref('')
 const selectedNodeId = ref('')
+const selectedProjectId = ref('')
 const selectedTask = ref<Task | null>(null)
 const taskLogs = ref<TaskLog[]>([])
 const taskFilter = ref<'all' | 'active' | 'failed'>('all')
+const nodeDetailTab = ref<NodeDetailTab>('containers')
+const nodeSearch = ref('')
+const containerSearch = ref('')
+const containerStateFilter = ref<ContainerFilter>('all')
+const projectSearch = ref('')
+const projectFilter = ref<ProjectFilter>('all')
 const toasts = ref<Toast[]>([])
 const pendingActions = ref<string[]>([])
 const currentClock = ref('')
@@ -908,6 +1008,10 @@ const policyDrafts = reactive<Record<string, Policy>>({})
 
 const isAdmin = computed(() => user.value?.role === 'admin')
 const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value))
+const selectedProject = computed(() => dockerState.compose_projects.find((project) => project.id === selectedProjectId.value))
+const onlineNodes = computed(() => nodes.value.filter((node) => node.status === 'online'))
+const activeTasks = computed(() => tasks.value.filter((task) => task.status === 'pending' || task.status === 'running'))
+const failedTasks = computed(() => tasks.value.filter((task) => task.status === 'failed'))
 const memoryPercent = computed(() => percent(overview.last_metric.memory_used, overview.last_metric.memory_total))
 const diskPercent = computed(() => percent(overview.last_metric.disk_used, overview.last_metric.disk_total))
 const shortCommit = computed(() => (versionInfo.commit && versionInfo.commit !== 'dev' ? versionInfo.commit.slice(0, 12) : versionInfo.commit || '-'))
@@ -937,13 +1041,68 @@ const outdatedAgentCount = computed(() => nodes.value.filter((node) => agentCanU
 const viewTitle = computed(() => {
   const titles: Record<ViewName, string> = {
     dashboard: '总览',
-    nodes: '节点',
+    nodes: selectedNode.value?.name || '节点',
+    projects: '项目',
     updates: '更新',
     tasks: '任务',
     settings: '设置'
   }
   return titles[activeView.value]
 })
+const viewSection = computed(() => {
+  const sections: Record<ViewName, string> = {
+    dashboard: '运行态',
+    nodes: '运行态',
+    projects: '运行态',
+    updates: '自动化',
+    tasks: '自动化',
+    settings: '系统'
+  }
+  return sections[activeView.value]
+})
+const filteredNodes = computed(() => {
+  const keyword = nodeSearch.value.trim().toLowerCase()
+  if (!keyword) return nodes.value
+  return nodes.value.filter((node) =>
+    [node.name, node.id, node.note, node.os, node.arch, node.docker_version, node.compose_version]
+      .filter(Boolean)
+      .some((value) => value.toLowerCase().includes(keyword))
+  )
+})
+const filteredContainers = computed(() => {
+  const keyword = containerSearch.value.trim().toLowerCase()
+  return dockerState.containers.filter((container) => {
+    const stateMatch =
+      containerStateFilter.value === 'all' ||
+      (containerStateFilter.value === 'running' && container.state === 'running') ||
+      (containerStateFilter.value === 'stopped' && container.state !== 'running') ||
+      (containerStateFilter.value === 'updates' && container.update_available)
+    if (!stateMatch) return false
+    if (!keyword) return true
+    return [container.name, container.image, container.state, container.status, container.compose_project]
+      .filter(Boolean)
+      .some((value) => value.toLowerCase().includes(keyword))
+  })
+})
+const filteredProjects = computed(() => {
+  const keyword = projectSearch.value.trim().toLowerCase()
+  return dockerState.compose_projects.filter((project) => {
+    const statusMatch =
+      projectFilter.value === 'all' ||
+      (projectFilter.value === 'updates' && project.update_available) ||
+      (projectFilter.value === 'failed' && (project.detection_status === 'failed' || project.detection_status === 'partial')) ||
+      (projectFilter.value === 'current' && !project.update_available && project.detection_status !== 'failed' && project.detection_status !== 'partial')
+    if (!statusMatch) return false
+    if (!keyword) return true
+    return [project.name, project.path, project.detection_status, project.detection_error || '']
+      .filter(Boolean)
+      .some((value) => value.toLowerCase().includes(keyword))
+  })
+})
+const updateProjects = computed(() => dockerState.compose_projects.filter((project) => project.update_available))
+const failedProjects = computed(() =>
+  dockerState.compose_projects.filter((project) => project.detection_status === 'failed' || project.detection_status === 'partial')
+)
 const composePolicyRows = computed(() =>
   dockerState.compose_projects.map((project) => ({
     project,
@@ -952,10 +1111,10 @@ const composePolicyRows = computed(() =>
 )
 const visibleTasks = computed(() => {
   if (taskFilter.value === 'failed') {
-    return tasks.value.filter((task) => task.status === 'failed')
+    return failedTasks.value
   }
   if (taskFilter.value === 'active') {
-    return tasks.value.filter((task) => task.status === 'pending' || task.status === 'running')
+    return activeTasks.value
   }
   return tasks.value
 })
@@ -968,6 +1127,18 @@ const selectedTaskLogs = computed(() => {
   }
   return taskLogs.value.map((line) => `[${line.created_at}] ${line.line}`).join('\n')
 })
+const commandItems = computed(() => [
+  { label: '交互式部署/卸载', value: installInfo.interactive || '' },
+  { label: 'Agent 二进制接入', value: installInfo.agent_binary || installInfo.binary_command || '' },
+  { label: 'Agent Docker 接入', value: installInfo.agent_docker || installInfo.docker_command || '' },
+  { label: 'Server Docker 部署', value: installInfo.server_docker || '' },
+  { label: 'Server 二进制部署', value: installInfo.server_binary || '' },
+  { label: '交互式卸载', value: installInfo.uninstall || '' },
+  { label: '仅卸载 Agent', value: installInfo.uninstall_agent || '' },
+  { label: '仅卸载 Server', value: installInfo.uninstall_server || '' },
+  { label: '全部卸载', value: installInfo.uninstall_all || '' },
+  { label: '彻底卸载', value: installInfo.uninstall_purge || '' }
+])
 
 const PolicyEditor = defineComponent({
   props: {
@@ -1048,6 +1219,7 @@ watch(selectedNodeId, async (nodeId) => {
     dockerState.containers = []
     dockerState.images = []
     dockerState.compose_projects = []
+    selectedProjectId.value = ''
   }
   syncNodeForm()
 })
@@ -1149,6 +1321,10 @@ async function runAction<T>(key: string, startMessage: string, successMessage: s
   }
 }
 
+async function manualRefresh() {
+  await runAction('refresh', '正在刷新', '数据已刷新', refreshAll)
+}
+
 async function refreshAll() {
   error.value = ''
   try {
@@ -1195,6 +1371,33 @@ async function loadDocker(nodeId: string) {
   dockerState.containers = state.containers
   dockerState.images = state.images
   dockerState.compose_projects = state.compose_projects
+  syncProjectSelection()
+}
+
+function syncProjectSelection() {
+  if (selectedProjectId.value) {
+    const current = dockerState.compose_projects.find((project) => project.id === selectedProjectId.value)
+    if (current) {
+      editCompose(current)
+      return
+    }
+  }
+  const first = dockerState.compose_projects[0]
+  if (first) {
+    selectCompose(first)
+    return
+  }
+  selectedProjectId.value = ''
+  composeForm.id = ''
+  composeForm.name = ''
+  composeForm.path = ''
+  composeForm.content = ''
+  composeForm.deploy_now = false
+}
+
+function selectNode(nodeId: string, view?: ViewName) {
+  selectedNodeId.value = nodeId
+  if (view) activeView.value = view
 }
 
 function syncNodeForm() {
@@ -1230,10 +1433,25 @@ async function deleteNode() {
 
 async function createNodeTask(kind: string, targetType = '', targetId = '') {
   if (!selectedNodeId.value) return
-  const task = await runAction(`task:${selectedNodeId.value}:${kind}:${targetId}`, `正在创建任务：${taskTitle(kind)}`, `任务已创建：${taskTitle(kind)}`, () =>
-    api.createTask({ node_id: selectedNodeId.value, kind, target_type: targetType, target_id: targetId, args: {} })
-  )
+  const task = await createTaskForNode(selectedNodeId.value, kind, targetType, targetId)
   if (!task) return
+  await refreshTasks()
+}
+
+async function createTaskForNode(nodeId: string, kind: string, targetType = '', targetId = '') {
+  return runAction(`task:${nodeId}:${kind}:${targetId}`, `正在创建任务：${taskTitle(kind)}`, `任务已创建：${taskTitle(kind)}`, () =>
+    api.createTask({ node_id: nodeId, kind, target_type: targetType, target_id: targetId, args: {} })
+  )
+}
+
+async function detectAllNodes() {
+  const targets = nodes.value.filter((node) => node.status === 'online')
+  if (targets.length === 0) return
+  const created = await runAction('detect-all', '正在创建检测任务', '检测任务已创建', async () => {
+    await Promise.all(targets.map((node) => api.createTask({ node_id: node.id, kind: 'detect_updates', args: {} })))
+    return true
+  })
+  if (!created) return
   await refreshTasks()
 }
 
@@ -1285,6 +1503,11 @@ async function createProjectTask(kind: string, project: ComposeProject) {
   await refreshTasks()
 }
 
+async function createSelectedProjectTask(kind: string) {
+  if (!selectedProject.value) return
+  await createProjectTask(kind, selectedProject.value)
+}
+
 async function refreshTasks() {
   tasks.value = await api.tasks()
 }
@@ -1306,6 +1529,16 @@ async function openTask(task: Task) {
   activeView.value = 'tasks'
 }
 
+function openProject(project: ComposeProject) {
+  activeView.value = 'projects'
+  selectCompose(project)
+}
+
+function selectCompose(project: ComposeProject) {
+  selectedProjectId.value = project.id
+  editCompose(project)
+}
+
 function editCompose(project: ComposeProject) {
   composeForm.id = project.id
   composeForm.name = project.name
@@ -1315,6 +1548,8 @@ function editCompose(project: ComposeProject) {
 }
 
 function newCompose() {
+  activeView.value = 'projects'
+  selectedProjectId.value = ''
   composeForm.id = ''
   composeForm.name = ''
   composeForm.path = '/opt/app/compose.yml'
@@ -1335,6 +1570,7 @@ async function saveCompose() {
     })
   )
   if (!saved) return
+  selectedProjectId.value = saved.id
   await loadDocker(selectedNodeId.value)
   await refreshTasks()
 }
@@ -1478,6 +1714,21 @@ function taskTitle(kind: string) {
     agent_update: '升级 Agent'
   }
   return titles[kind] || kind
+}
+
+function statusText(status: string) {
+  const labels: Record<string, string> = {
+    pending: '等待',
+    running: '运行',
+    success: '成功',
+    failed: '失败',
+    canceled: '取消'
+  }
+  return labels[status] || status
+}
+
+function taskNodeName(nodeID: string) {
+  return nodes.value.find((node) => node.id === nodeID)?.name || nodeID
 }
 
 function agentCanUpdate(node?: Node) {

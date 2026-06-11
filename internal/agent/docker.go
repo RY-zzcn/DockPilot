@@ -115,10 +115,10 @@ func (d DockerClient) images(ctx context.Context) []protocol.ImageSnapshot {
 func (d DockerClient) composeProjects(ctx context.Context) []protocol.ComposeProjectSnapshot {
 	seen := map[string]protocol.ComposeProjectSnapshot{}
 	for _, project := range d.composeProjectsFromCLI(ctx) {
-		seen[project.ID] = project
+		mergeComposeProject(seen, project)
 	}
-	for _, project := range d.composeProjectsFromDirs() {
-		seen[project.ID] = project
+	for _, project := range d.composeProjectsFromDirs(ctx) {
+		mergeComposeProject(seen, project)
 	}
 	var projects []protocol.ComposeProjectSnapshot
 	for _, project := range seen {
@@ -126,6 +126,20 @@ func (d DockerClient) composeProjects(ctx context.Context) []protocol.ComposePro
 	}
 	sort.Slice(projects, func(i, j int) bool { return projects[i].Name < projects[j].Name })
 	return projects
+}
+
+func mergeComposeProject(seen map[string]protocol.ComposeProjectSnapshot, project protocol.ComposeProjectSnapshot) {
+	if project.ID == "" {
+		return
+	}
+	if existing, ok := seen[project.ID]; ok {
+		if existing.Content == "" && project.Content != "" {
+			existing.Content = project.Content
+			seen[project.ID] = existing
+		}
+		return
+	}
+	seen[project.ID] = project
 }
 
 func (d DockerClient) composeProjectsFromCLI(ctx context.Context) []protocol.ComposeProjectSnapshot {
@@ -150,23 +164,69 @@ func (d DockerClient) composeProjectsFromCLI(ctx context.Context) []protocol.Com
 	return projects
 }
 
-func (d DockerClient) composeProjectsFromDirs() []protocol.ComposeProjectSnapshot {
+func (d DockerClient) composeProjectsFromDirs(ctx context.Context) []protocol.ComposeProjectSnapshot {
 	var projects []protocol.ComposeProjectSnapshot
 	for _, root := range d.ComposeDirs {
+		if ctx.Err() != nil {
+			break
+		}
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "." || root == "" {
+			continue
+		}
+		info, err := os.Stat(root)
+		if err != nil || !info.IsDir() {
+			continue
+		}
 		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-			if err != nil || entry.IsDir() {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err != nil {
 				return nil
 			}
-			name := entry.Name()
-			if name != "compose.yml" && name != "compose.yaml" && name != "docker-compose.yml" && name != "docker-compose.yaml" {
+			if entry.IsDir() {
+				if shouldSkipComposeScanDir(root, path, entry.Name()) {
+					return filepath.SkipDir
+				}
 				return nil
 			}
-			projectName := filepath.Base(filepath.Dir(path))
-			projects = append(projects, composeProject(projectName, path, false))
+			if !isComposeFileName(entry.Name()) {
+				return nil
+			}
+			projects = append(projects, composeProject(composeProjectNameFromPath(path), path, false))
 			return nil
 		})
 	}
 	return projects
+}
+
+func shouldSkipComposeScanDir(root, path, name string) bool {
+	if filepath.Clean(path) == filepath.Clean(root) {
+		return false
+	}
+	switch name {
+	case ".git", ".hg", ".svn", "node_modules", "vendor", "dist", "build", "target", "__pycache__", ".cache", ".next", ".nuxt":
+		return true
+	}
+	return strings.HasPrefix(name, ".")
+}
+
+func isComposeFileName(name string) bool {
+	switch name {
+	case "compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml":
+		return true
+	default:
+		return false
+	}
+}
+
+func composeProjectNameFromPath(path string) string {
+	name := filepath.Base(filepath.Dir(path))
+	if strings.TrimSpace(name) == "" || name == "." || name == string(filepath.Separator) {
+		return "compose"
+	}
+	return name
 }
 
 func composeProject(name, path string, managed bool) protocol.ComposeProjectSnapshot {
@@ -205,7 +265,7 @@ func parseLabels(value string) map[string]string {
 }
 
 func stableID(value string) string {
-	hash := sha1.Sum([]byte(value))
+	hash := sha1.Sum([]byte(filepath.Clean(value)))
 	return "compose_" + hex.EncodeToString(hash[:])[:16]
 }
 
