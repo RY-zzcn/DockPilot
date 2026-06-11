@@ -205,11 +205,28 @@ func shouldSkipComposeScanDir(root, path, name string) bool {
 	if filepath.Clean(path) == filepath.Clean(root) {
 		return false
 	}
+	if isKnownComposeTemplateDir(path) {
+		return true
+	}
 	switch name {
 	case ".git", ".hg", ".svn", "node_modules", "vendor", "dist", "build", "target", "__pycache__", ".cache", ".next", ".nuxt":
 		return true
 	}
 	return strings.HasPrefix(name, ".")
+}
+
+func isKnownComposeTemplateDir(path string) bool {
+	clean := filepath.ToSlash(filepath.Clean(path))
+	templateDirs := []string{
+		"/1panel/resource/apps/remote",
+		"/1panel/resource/apps/local",
+	}
+	for _, dir := range templateDirs {
+		if strings.Contains(clean, dir) {
+			return true
+		}
+	}
+	return false
 }
 
 func isComposeFileName(name string) bool {
@@ -231,6 +248,10 @@ func composeProjectNameFromPath(path string) string {
 
 func composeProject(name, path string, managed bool) protocol.ComposeProjectSnapshot {
 	content := ""
+	if !managed {
+		// Scanned host projects often contain secrets in environment blocks.
+		return protocol.ComposeProjectSnapshot{ID: stableID(path), Name: name, Path: path, Managed: managed}
+	}
 	if info, err := os.Stat(path); err == nil && info.Size() < 256*1024 {
 		raw, _ := os.ReadFile(path)
 		content = string(raw)

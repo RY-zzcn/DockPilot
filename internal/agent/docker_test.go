@@ -152,6 +152,44 @@ func TestComposeProjectsFromDirsSkipsNoisyDirs(t *testing.T) {
 	}
 }
 
+func TestComposeProjectsFromDirsSkips1PanelResourceTemplates(t *testing.T) {
+	root := t.TempDir()
+	activeDir := filepath.Join(root, "1panel", "apps", "openresty", "openresty")
+	if err := os.MkdirAll(activeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeDir, "docker-compose.yml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	templateDir := filepath.Join(root, "1panel", "resource", "apps", "remote", "openresty", "1.29.2.5-0-noble")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templateDir, "docker-compose.yml"), []byte("services:\n  app:\n    volumes:\n      - ${WEBSITE_DIR}:/www\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projects := DockerClient{ComposeDirs: []string{root}}.composeProjectsFromDirs(context.Background())
+	if len(projects) != 1 {
+		t.Fatalf("composeProjectsFromDirs length = %d, want 1: %#v", len(projects), projects)
+	}
+	if projects[0].Path != filepath.Join(activeDir, "docker-compose.yml") {
+		t.Fatalf("unexpected project path: %s", projects[0].Path)
+	}
+}
+
+func TestComposeProjectDoesNotExposeScannedContent(t *testing.T) {
+	root := t.TempDir()
+	file := filepath.Join(root, "compose.yml")
+	if err := os.WriteFile(file, []byte("services:\n  db:\n    environment:\n      PASSWORD: secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := composeProject("app", file, false)
+	if project.Content != "" {
+		t.Fatalf("scanned compose content should be hidden, got %q", project.Content)
+	}
+}
+
 func TestParseContainerManifestDigests(t *testing.T) {
 	arrayOutput := `[{"ImageManifestDescriptor":{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}]`
 	objectOutput := `{"ImageManifestDescriptor":{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}`

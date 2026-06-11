@@ -195,7 +195,7 @@ func (a *App) handleAPI(w http.ResponseWriter, r *http.Request) {
 	case path == "/policies" && (r.Method == http.MethodPost || r.Method == http.MethodPut):
 		RequireAdmin(a.handleUpsertPolicy)(w, r)
 	case path == "/notifications" && r.Method == http.MethodGet:
-		a.handleListNotifications(w, r)
+		RequireAdmin(a.handleListNotifications)(w, r)
 	case path == "/notifications" && (r.Method == http.MethodPost || r.Method == http.MethodPut):
 		RequireAdmin(a.handleUpsertNotification)(w, r)
 	case path == "/users" && r.Method == http.MethodGet:
@@ -381,8 +381,34 @@ func (a *App) handleSaveCompose(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	body.Name = strings.TrimSpace(body.Name)
+	body.Path = filepath.Clean(strings.TrimSpace(body.Path))
 	if body.NodeID == "" || body.Name == "" || body.Path == "" {
 		writeError(w, http.StatusBadRequest, "node_id, name and path are required")
+		return
+	}
+	if !filepath.IsAbs(body.Path) {
+		writeError(w, http.StatusBadRequest, "compose path must be an absolute path")
+		return
+	}
+	if body.ID != "" {
+		existing, err := a.store.GetComposeProject(body.NodeID, body.ID)
+		if err == nil && !existing.Managed {
+			writeError(w, http.StatusForbidden, "scanned compose projects are read-only; create a panel-managed compose project to edit from the panel")
+			return
+		}
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	existingByPath, err := a.store.GetComposeProjectByPath(body.NodeID, body.Path)
+	if err == nil && existingByPath.ID != body.ID && !existingByPath.Managed {
+		writeError(w, http.StatusForbidden, "this compose path belongs to a scanned host project and cannot be taken over from the panel")
+		return
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	project, err := a.store.SaveComposeProject(body.NodeID, body.ID, body.Name, body.Path, body.Content, CurrentUser(r).Username)
@@ -468,7 +494,7 @@ func (a *App) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 func allowedTaskKind(kind string) bool {
 	switch kind {
-	case "detect_updates", "agent_update", "compose_update", "compose_deploy", "restart_container", "prune_images":
+	case "detect_updates", "agent_update", "compose_update", "restart_container", "prune_images":
 		return true
 	default:
 		return false

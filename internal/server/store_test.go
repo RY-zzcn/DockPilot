@@ -67,6 +67,44 @@ func TestDefaultPolicyDisablesAutomaticUpdateOnly(t *testing.T) {
 	}
 }
 
+func TestAllowedTaskKindRejectsDirectComposeDeploy(t *testing.T) {
+	if allowedTaskKind("compose_deploy") {
+		t.Fatal("compose_deploy should not be creatable through the generic task API")
+	}
+	if !allowedTaskKind("compose_update") {
+		t.Fatal("compose_update should remain allowed")
+	}
+}
+
+func TestDockerStateRedactsScannedComposeContent(t *testing.T) {
+	store := testStore(t)
+	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")
+	if err != nil {
+		t.Fatalf("upsert node: %v", err)
+	}
+	if err := store.ReplaceDockerSnapshot("node-1", protocol.DockerSnapshotPayload{
+		ComposeProjects: []protocol.ComposeProjectSnapshot{{
+			ID:      "compose-scanned",
+			Name:    "site",
+			Path:    "/opt/site/compose.yml",
+			Managed: false,
+			Content: "services:\n  db:\n    environment:\n      PASSWORD: secret\n",
+		}},
+	}); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	state, err := store.DockerState("node-1")
+	if err != nil {
+		t.Fatalf("docker state: %v", err)
+	}
+	if len(state.ComposeProjects) != 1 {
+		t.Fatalf("compose projects length = %d, want 1", len(state.ComposeProjects))
+	}
+	if state.ComposeProjects[0].Content != "" {
+		t.Fatalf("scanned compose content should be redacted, got %q", state.ComposeProjects[0].Content)
+	}
+}
+
 func TestTaskLifecycle(t *testing.T) {
 	store := testStore(t)
 	_, _, err := store.UpsertNodeFromHello(testHello("node-1"), "node-1")

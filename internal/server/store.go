@@ -762,6 +762,10 @@ VALUES(?,?,?,?,?,?,datetime('now','localtime'))`,
 		}
 	}
 	for _, project := range snapshot.ComposeProjects {
+		content := project.Content
+		if !project.Managed {
+			content = ""
+		}
 		_, err := tx.Exec(`
 INSERT INTO compose_projects(id, node_id, name, path, managed, content, last_seen, updated_at)
 VALUES(?,?,?,?,?,?,datetime('now','localtime'),datetime('now','localtime'))
@@ -772,7 +776,7 @@ ON CONFLICT(node_id, id) DO UPDATE SET
   managed = CASE WHEN compose_projects.managed = 1 THEN 1 ELSE excluded.managed END,
   last_seen = datetime('now','localtime'),
   updated_at = datetime('now','localtime')`,
-			project.ID, nodeID, project.Name, project.Path, boolInt(project.Managed), project.Content)
+			project.ID, nodeID, project.Name, project.Path, boolInt(project.Managed), content)
 		if err != nil {
 			return err
 		}
@@ -935,6 +939,11 @@ func (s *Store) DockerState(nodeID string) (DockerState, error) {
 	if err != nil {
 		return state, err
 	}
+	for i := range projects {
+		if !projects[i].Managed {
+			projects[i].Content = ""
+		}
+	}
 	state.Containers = containers
 	state.Images = images
 	state.ComposeProjects = projects
@@ -980,6 +989,13 @@ ON CONFLICT(node_id, id) DO UPDATE SET
 func (s *Store) GetComposeProject(nodeID, projectID string) (ComposeProject, error) {
 	var project ComposeProject
 	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND id = ?`, nodeID, projectID).
+		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
+	return project, err
+}
+
+func (s *Store) GetComposeProjectByPath(nodeID, path string) (ComposeProject, error) {
+	var project ComposeProject
+	err := s.db.QueryRow(`SELECT id, node_id, name, path, managed, content, version, update_available, checked_at, detection_status, detection_method, detection_platform, detection_error, last_seen, updated_at FROM compose_projects WHERE node_id = ? AND path = ? ORDER BY managed DESC, updated_at DESC LIMIT 1`, nodeID, path).
 		Scan(&project.ID, &project.NodeID, &project.Name, &project.Path, boolScanner(&project.Managed), &project.Content, &project.Version, boolScanner(&project.UpdateAvailable), &project.CheckedAt, &project.DetectionStatus, &project.DetectionMethod, &project.DetectionPlatform, &project.DetectionError, &project.LastSeen, &project.UpdatedAt)
 	return project, err
 }

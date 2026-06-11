@@ -468,6 +468,9 @@
                 </button>
               </div>
             </div>
+            <p v-if="selectedProject && !selectedProject.managed" class="security-note">
+              扫描到的 Compose 默认只读，面板不显示文件内容，也不能直接覆盖修改。需要变更请在节点端编辑，或新建面板托管 Compose。
+            </p>
             <div v-if="selectedProject" class="project-meta">
               <span><strong>状态</strong><em :class="detectionBadgeClass(selectedProject)" :title="detectionTitle(selectedProject)">{{ detectionLabel(selectedProject) }}</em></span>
               <span><strong>检测</strong>{{ detectionMeta(selectedProject) || '-' }}</span>
@@ -477,20 +480,25 @@
               <div class="form-grid">
                 <label>
                   <span>名称</span>
-                  <input v-model="composeForm.name" :disabled="!isAdmin" />
+                  <input v-model="composeForm.name" :disabled="!canEditCompose" />
                 </label>
                 <label>
                   <span>路径</span>
-                  <input v-model="composeForm.path" :disabled="!isAdmin" />
+                  <input v-model="composeForm.path" :disabled="!canEditCompose" />
                 </label>
               </div>
-              <textarea v-model="composeForm.content" :disabled="!isAdmin" spellcheck="false"></textarea>
+              <textarea
+                v-model="composeForm.content"
+                :disabled="!canEditCompose"
+                :placeholder="selectedProject && !selectedProject.managed ? '扫描项目内容已隐藏。' : ''"
+                spellcheck="false"
+              ></textarea>
               <div class="button-row">
                 <label class="checkline">
-                  <input v-model="composeForm.deploy_now" type="checkbox" :disabled="!isAdmin" />
+                  <input v-model="composeForm.deploy_now" type="checkbox" :disabled="!canEditCompose" />
                   立即部署
                 </label>
-                <button class="primary" type="submit" :disabled="!selectedNodeId || !isAdmin">
+                <button class="primary" type="submit" :disabled="!selectedNodeId || !canEditCompose">
                   <Save :size="18" />
                   保存
                 </button>
@@ -679,10 +687,18 @@
               @click="openTask(task)"
             >
               <span class="badge" :class="task.status">{{ statusText(task.status) }}</span>
-              <strong>{{ taskTitle(task.kind) }}</strong>
-              <small>{{ taskMessage(task) || task.target_id || '-' }}</small>
-              <small>{{ taskNodeName(task.node_id) }}</small>
-              <small>{{ task.created_at }}</small>
+              <div class="task-main">
+                <div class="task-summary">
+                  <strong>{{ taskTitle(task.kind) }}</strong>
+                  <small>{{ task.created_at }}</small>
+                </div>
+                <p class="task-message">{{ taskMessage(task) || task.target_id || '-' }}</p>
+                <div class="task-meta-row">
+                  <span>{{ taskNodeName(task.node_id) }}</span>
+                  <span>{{ task.target_type || '任务' }}</span>
+                  <span>{{ shortTaskId(task.id) }}</span>
+                </div>
+              </div>
             </button>
           </div>
         </section>
@@ -918,7 +934,7 @@ import type {
 } from './types'
 
 type ViewName = 'dashboard' | 'nodes' | 'projects' | 'updates' | 'tasks' | 'settings'
-type ThemeName = 'light' | 'sky' | 'operator' | 'mono'
+type ThemeName = 'system' | 'light' | 'dark'
 type ToastType = 'info' | 'success' | 'error'
 type NodeDetailTab = 'containers' | 'images' | 'compose' | 'profile'
 type ContainerFilter = 'all' | 'running' | 'stopped' | 'updates'
@@ -934,10 +950,9 @@ interface Toast {
 const THEME_KEY = 'dockpilot.theme'
 const REFRESH_INTERVAL_MS = 10000
 const themes: { value: ThemeName; label: string }[] = [
-  { value: 'light', label: '白色' },
-  { value: 'sky', label: '浅蓝' },
-  { value: 'operator', label: '深色' },
-  { value: 'mono', label: '黑白夜' }
+  { value: 'system', label: '跟随系统' },
+  { value: 'light', label: '蓝白' },
+  { value: 'dark', label: '夜间' }
 ]
 const commandTabs: { value: CommandCategory; label: string }[] = [
   { value: 'quick', label: '快速' },
@@ -949,8 +964,9 @@ const savedTheme = normalizeTheme(localStorage.getItem(THEME_KEY))
 const token = ref(getToken())
 const user = ref<AuthClaims | null>(null)
 const activeView = ref<ViewName>('dashboard')
-const themeName = ref<ThemeName>(savedTheme || 'sky')
+const themeName = ref<ThemeName>(savedTheme || 'system')
 const themeMenuOpen = ref(false)
+const systemPrefersDark = ref(window.matchMedia('(prefers-color-scheme: dark)').matches)
 const busy = ref(false)
 const error = ref('')
 const selectedNodeId = ref('')
@@ -972,6 +988,7 @@ let clockTimer: number | undefined
 let refreshTimer: number | undefined
 let refreshPromise: Promise<void> | null = null
 let toastID = 0
+const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
 const loginForm = reactive({ username: 'admin', password: 'admin' })
 const overview = reactive<Overview>({
@@ -1054,6 +1071,7 @@ const policyDrafts = reactive<Record<string, Policy>>({})
 const isAdmin = computed(() => user.value?.role === 'admin')
 const selectedNode = computed(() => nodes.value.find((node) => node.id === selectedNodeId.value))
 const selectedProject = computed(() => dockerState.compose_projects.find((project) => project.id === selectedProjectId.value))
+const canEditCompose = computed(() => isAdmin.value && (!selectedProject.value || selectedProject.value.managed))
 const onlineNodes = computed(() => nodes.value.filter((node) => node.status === 'online'))
 const activeTasks = computed(() => tasks.value.filter((task) => task.status === 'pending' || task.status === 'running'))
 const failedTasks = computed(() => tasks.value.filter((task) => task.status === 'failed'))
@@ -1062,6 +1080,7 @@ const diskPercent = computed(() => percent(overview.last_metric.disk_used, overv
 const shortCommit = computed(() => (versionInfo.commit && versionInfo.commit !== 'dev' ? versionInfo.commit.slice(0, 12) : versionInfo.commit || '-'))
 const latestReleaseVersion = computed(() => versionInfo.release?.latest_version || '')
 const currentThemeLabel = computed(() => themes.find((theme) => theme.value === themeName.value)?.label || '主题')
+const effectiveTheme = computed(() => (themeName.value === 'system' ? (systemPrefersDark.value ? 'dark' : 'light') : themeName.value))
 const agentTargetVersion = computed(() => {
   const configured = runtimeSettings.agent_auto_update_version || 'latest'
   if (configured === 'latest') {
@@ -1177,7 +1196,7 @@ const commandItems = computed(() => [
 ])
 const commandGroups = computed<Record<CommandCategory, { label: string; value: string }[]>>(() => ({
   quick: [
-    { label: '交互式部署/卸载', value: installInfo.interactive || '' }
+    { label: '交互式部署', value: installInfo.interactive || '' }
   ],
   agent: [
     { label: 'Agent Docker 接入', value: installInfo.agent_docker || installInfo.docker_command || '' },
@@ -1189,10 +1208,7 @@ const commandGroups = computed<Record<CommandCategory, { label: string; value: s
   ],
   remove: [
     { label: '交互式卸载', value: installInfo.uninstall || '' },
-    { label: '仅卸载 Agent', value: installInfo.uninstall_agent || '' },
-    { label: '仅卸载 Server', value: installInfo.uninstall_server || '' },
-    { label: '全部卸载', value: installInfo.uninstall_all || '' },
-    { label: '彻底卸载', value: installInfo.uninstall_purge || '' }
+    { label: '彻底卸载（删除数据）', value: installInfo.uninstall_purge || '' }
   ]
 }))
 
@@ -1246,15 +1262,22 @@ const PolicyEditor = defineComponent({
 })
 
 watch(
-  themeName,
+  effectiveTheme,
   (value) => {
     document.documentElement.dataset.theme = value
+  },
+  { immediate: true }
+)
+watch(
+  themeName,
+  (value) => {
     localStorage.setItem(THEME_KEY, value)
   },
   { immediate: true }
 )
 
 onMounted(() => {
+  systemThemeQuery.addEventListener('change', syncSystemTheme)
   tickClock()
   clockTimer = window.setInterval(tickClock, 1000)
   bootstrap()
@@ -1265,6 +1288,7 @@ onMounted(() => {
   }, REFRESH_INTERVAL_MS)
 })
 onUnmounted(() => {
+  systemThemeQuery.removeEventListener('change', syncSystemTheme)
   if (clockTimer) window.clearInterval(clockTimer)
   if (refreshTimer) window.clearInterval(refreshTimer)
 })
@@ -1295,12 +1319,16 @@ async function bootstrap() {
 }
 
 function normalizeTheme(value: string | null): ThemeName | null {
-  if (value === 'light' || value === 'sky' || value === 'operator' || value === 'mono') {
+  if (value === 'system' || value === 'light' || value === 'dark') {
     return value
   }
-  if (value === 'graphite') return 'mono'
-  if (value === 'ember' || value === 'terminal') return 'operator'
+  if (value === 'sky') return 'light'
+  if (value === 'operator' || value === 'mono' || value === 'graphite' || value === 'ember' || value === 'terminal') return 'dark'
   return null
+}
+
+function syncSystemTheme(event: MediaQueryListEvent) {
+  systemPrefersDark.value = event.matches
 }
 
 function tickClock() {
@@ -1409,7 +1437,7 @@ async function doRefreshAll() {
       api.tasks(),
       api.updateRecords(),
       api.policies(),
-      api.notifications(),
+      isAdmin.value ? api.notifications() : Promise.resolve([]),
       api.version()
     ])
     Object.assign(overview, overviewData)
@@ -1635,7 +1663,7 @@ function editCompose(project: ComposeProject) {
   composeForm.id = project.id
   composeForm.name = project.name
   composeForm.path = project.path
-  composeForm.content = project.content || ''
+  composeForm.content = project.managed ? project.content || '' : ''
   composeForm.deploy_now = false
 }
 
@@ -1651,6 +1679,10 @@ function newCompose() {
 
 async function saveCompose() {
   if (!selectedNodeId.value) return
+  if (!canEditCompose.value) {
+    notify('扫描到的 Compose 项目为只读，不能在面板覆盖修改。', 'error')
+    return
+  }
   const saved = await runAction('save-compose', composeForm.deploy_now ? '正在保存并创建部署任务' : '正在保存 Compose', composeForm.deploy_now ? 'Compose 已保存，部署任务已创建' : 'Compose 已保存', () =>
     api.saveCompose({
       node_id: selectedNodeId.value,
@@ -1852,6 +1884,11 @@ function taskTitle(kind: string) {
     agent_update: '升级 Agent'
   }
   return titles[kind] || kind
+}
+
+function shortTaskId(id: string) {
+  if (!id) return '-'
+  return id.length > 18 ? `${id.slice(0, 10)}...${id.slice(-6)}` : id
 }
 
 function statusText(status: string) {
