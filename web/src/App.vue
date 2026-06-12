@@ -2,7 +2,7 @@
   <main v-if="!token" class="login-page">
     <form class="login-panel" @submit.prevent="login">
       <div class="login-brand">
-        <div class="brand-mark">D</div>
+        <img class="brand-logo" src="/logo.png" alt="DockPilot" />
         <div>
           <p class="eyebrow">DockPilot</p>
           <h1>Docker 运维控制台</h1>
@@ -27,7 +27,7 @@
   <div v-else class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">D</div>
+        <img class="brand-logo" src="/logo.png" alt="DockPilot" />
         <div>
           <strong>DockPilot</strong>
           <span>{{ user?.username }} · v{{ versionInfo.version }}</span>
