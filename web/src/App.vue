@@ -348,7 +348,7 @@
                 </label>
                 <label>
                   <span>Agent 版本</span>
-                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.22" />
+                  <input v-model="agentInstallForm.version" :disabled="!isAdmin" placeholder="latest 或 v0.2.23" />
                 </label>
                 <div class="install-mode">
                   <span>安装方式</span>
@@ -428,11 +428,11 @@
                 <span></span>
               </div>
               <div v-for="container in filteredContainers" :key="container.id" class="table-row">
-                <strong :title="container.name">{{ container.name }}</strong>
-                <span :title="container.image">{{ container.image }}</span>
-                <span :title="container.status || container.state"><em class="badge" :class="container.state">{{ container.state }}</em></span>
-                <span :title="container.compose_project || '-'">{{ container.compose_project || '-' }}</span>
-                <span class="row-actions">
+                <strong data-label="名称" :title="container.name">{{ container.name }}</strong>
+                <span data-label="镜像" :title="container.image">{{ container.image }}</span>
+                <span data-label="状态" :title="container.status || container.state"><em class="badge" :class="container.state">{{ container.state }}</em></span>
+                <span data-label="Compose" :title="container.compose_project || '-'">{{ container.compose_project || '-' }}</span>
+                <span class="row-actions" data-label="">
                   <button
                     class="icon-button"
                     title="重启容器"
@@ -459,10 +459,10 @@
                 <span>创建时间</span>
               </div>
               <div v-for="image in dockerState.images" :key="image.id + image.repository + image.tag" class="table-row">
-                <strong :title="image.repository">{{ image.repository }}</strong>
-                <span :title="image.tag">{{ image.tag }}</span>
-                <span :title="image.size">{{ image.size }}</span>
-                <span :title="image.created_at">{{ image.created_at }}</span>
+                <strong data-label="仓库" :title="image.repository">{{ image.repository }}</strong>
+                <span data-label="标签" :title="image.tag">{{ image.tag }}</span>
+                <span data-label="大小" :title="image.size">{{ image.size }}</span>
+                <span data-label="创建时间" :title="image.created_at">{{ image.created_at }}</span>
               </div>
             </div>
           </section>
@@ -752,11 +752,11 @@
               <span>状态</span>
             </div>
             <div v-for="record in updateRecords" :key="record.id" class="table-row">
-              <span :title="record.created_at">{{ record.created_at }}</span>
-              <strong :title="record.name || '-'">{{ record.name || '-' }}</strong>
-              <span :title="taskNodeName(record.node_id)">{{ taskNodeName(record.node_id) }}</span>
-              <span :title="`${record.previous_version || '-'} -> ${record.current_version || '-'}`">{{ shortVersion(record.previous_version) }} -> {{ shortVersion(record.current_version) }}</span>
-              <span><em class="badge" :class="record.changed ? 'success' : 'pending'">{{ record.changed ? '已更新' : '未变化' }}</em></span>
+              <span data-label="时间" :title="record.created_at">{{ record.created_at }}</span>
+              <strong data-label="容器" :title="record.name || '-'">{{ record.name || '-' }}</strong>
+              <span data-label="节点" :title="taskNodeName(record.node_id)">{{ taskNodeName(record.node_id) }}</span>
+              <span data-label="镜像变化" :title="`${record.previous_version || '-'} -> ${record.current_version || '-'}`">{{ shortVersion(record.previous_version) }} -> {{ shortVersion(record.current_version) }}</span>
+              <span data-label="状态"><em class="badge" :class="record.changed ? 'success' : 'pending'">{{ record.changed ? '已更新' : '未变化' }}</em></span>
             </div>
           </div>
         </section>
@@ -778,11 +778,11 @@
               <span></span>
             </div>
             <div v-for="node in nodes" :key="node.id" class="table-row">
-              <strong :title="node.name">{{ node.name }}</strong>
-              <span :title="node.version ? `v${node.version}` : '-'">{{ node.version ? `v${node.version}` : '-' }}</span>
-              <span :title="`${node.os}/${node.arch}`">{{ node.os }}/{{ node.arch }}</span>
-              <span><em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em></span>
-              <span class="row-actions">
+              <strong data-label="节点" :title="node.name">{{ node.name }}</strong>
+              <span data-label="Agent" :title="node.version ? `v${node.version}` : '-'">{{ node.version ? `v${node.version}` : '-' }}</span>
+              <span data-label="系统" :title="`${node.os}/${node.arch}`">{{ node.os }}/{{ node.arch }}</span>
+              <span data-label="状态"><em :class="agentVersionBadgeClass(node)">{{ agentVersionLabel(node) }}</em></span>
+              <span class="row-actions" data-label="">
                 <button class="icon-button" title="升级 Agent" :disabled="!isAdmin || !agentCanUpdate(node)" @click="upgradeAgent(node)">
                   <RefreshCw :size="16" />
                 </button>
@@ -823,13 +823,17 @@
             </div>
           </div>
           <div class="task-list">
-            <button
+            <article
               v-for="task in visibleTasks"
               :key="task.id"
               class="task-row"
               :class="{ selected: selectedTask?.id === task.id }"
               :title="taskTitleText(task)"
+              role="button"
+              tabindex="0"
               @click="openTask(task)"
+              @keydown.enter.prevent="openTask(task)"
+              @keydown.space.prevent="openTask(task)"
             >
               <span class="badge" :class="task.status">{{ statusText(task.status) }}</span>
               <div class="task-main">
@@ -844,7 +848,7 @@
                   <span :title="task.id">{{ shortTaskId(task.id) }}</span>
                 </div>
               </div>
-            </button>
+            </article>
             <p v-if="visibleTasks.length === 0" class="empty-hint">{{ taskView === 'current' ? '当前没有运行中的任务。' : '当前筛选没有历史任务。' }}</p>
           </div>
         </section>

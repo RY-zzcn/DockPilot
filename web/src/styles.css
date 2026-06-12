@@ -87,6 +87,7 @@
 }
 
 html {
+  min-height: 100%;
   overflow-y: scroll;
   scrollbar-gutter: stable;
 }
@@ -95,8 +96,15 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
+  overflow-x: clip;
   background: var(--bg);
   color: var(--text);
+}
+
+#app {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 button,
@@ -239,6 +247,7 @@ textarea {
 .app-shell {
   display: grid;
   min-height: 100vh;
+  min-height: 100dvh;
   grid-template-columns: 248px minmax(0, 1fr);
 }
 
@@ -361,6 +370,11 @@ textarea {
   align-content: start;
   gap: 16px;
   min-width: 0;
+  max-width: 100vw;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-x: clip;
   padding: 18px;
 }
 
@@ -376,6 +390,12 @@ textarea {
   min-width: 0;
 }
 
+.title-block h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .top-actions,
 .button-row,
 .inline-tools {
@@ -383,6 +403,12 @@ textarea {
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.top-actions > *,
+.button-row > *,
+.inline-tools > * {
+  min-width: 0;
 }
 
 .top-actions select {
@@ -456,10 +482,12 @@ textarea {
 .view-stack {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .surface {
   display: grid;
+  align-content: start;
   min-width: 0;
   gap: 12px;
   border: 1px solid var(--line);
@@ -736,6 +764,7 @@ details.surface {
 
 .node-resource-list {
   max-height: min(58vh, 620px);
+  max-height: min(58dvh, 620px);
   overflow: auto;
   padding-right: 2px;
   scrollbar-gutter: stable;
@@ -1082,11 +1111,13 @@ details.surface {
   display: grid;
   grid-template-columns: 310px minmax(0, 1fr);
   gap: 16px;
+  min-width: 0;
 }
 
 .node-rail {
   align-content: start;
   max-height: calc(100vh - 108px);
+  max-height: calc(100dvh - 108px);
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -1214,6 +1245,7 @@ details.surface {
 .update-record-table,
 .agent-table {
   max-height: min(52vh, 520px);
+  max-height: min(52dvh, 520px);
   overflow: auto;
 }
 
@@ -1310,10 +1342,12 @@ details.surface {
   grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
   gap: 14px;
   align-items: start;
+  min-width: 0;
 }
 
 .project-list-panel {
   max-height: calc(100vh - 190px);
+  max-height: calc(100dvh - 190px);
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -1321,6 +1355,7 @@ details.surface {
 .project-editor-panel {
   align-content: start;
   max-height: calc(100vh - 190px);
+  max-height: calc(100dvh - 190px);
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -1370,7 +1405,9 @@ details.surface {
 .compose-preview {
   min-height: 180px;
   max-height: min(44vh, 420px);
+  max-height: min(44dvh, 420px);
   overflow: auto;
+  scrollbar-gutter: stable;
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1390,6 +1427,7 @@ details.surface {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 12px;
+  min-width: 0;
 }
 
 .settings-grid {
@@ -1400,6 +1438,7 @@ details.surface {
   display: grid;
   gap: 10px;
   align-content: start;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
@@ -1408,6 +1447,7 @@ details.surface {
 
 .update-list {
   max-height: min(56vh, 560px);
+  max-height: min(56dvh, 560px);
   overflow: auto;
   padding-right: 2px;
   scrollbar-gutter: stable;
@@ -1502,12 +1542,14 @@ details.surface {
   grid-template-columns: minmax(0, 0.92fr) minmax(360px, 1.08fr);
   gap: 14px;
   align-items: start;
+  min-width: 0;
 }
 
 .task-panel,
 .task-detail {
   min-width: 0;
   max-height: calc(100vh - 108px);
+  max-height: calc(100dvh - 108px);
   overflow: auto;
   scrollbar-gutter: stable;
 }
@@ -1544,7 +1586,9 @@ details.surface {
   display: grid;
   width: 100%;
   min-width: 0;
+  max-width: 100%;
   gap: 10px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px 10px;
@@ -1554,7 +1598,10 @@ details.surface {
 }
 
 .task-list {
+  align-content: start;
+  grid-auto-rows: max-content;
   max-height: calc(100vh - 230px);
+  max-height: calc(100dvh - 230px);
   overflow: auto;
   padding-right: 2px;
   scrollbar-gutter: stable;
@@ -1563,8 +1610,15 @@ details.surface {
 .task-row {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  min-height: 72px;
-  padding: 9px 10px;
+  height: auto;
+  min-height: 84px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.task-row:focus-visible {
+  outline: 3px solid rgba(17, 121, 170, 0.22);
+  outline-offset: 2px;
 }
 
 .task-line {
@@ -1607,37 +1661,54 @@ details.surface {
 
 .task-main {
   display: grid;
+  align-content: start;
   min-width: 0;
-  gap: 6px;
+  max-width: 100%;
+  overflow: visible;
+  gap: 8px;
 }
 
 .task-summary,
 .task-meta-row {
   display: flex;
   min-width: 0;
+  max-width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  overflow: visible;
+}
+
+.task-summary {
+  min-height: 22px;
 }
 
 .task-summary strong {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--text);
   font-size: 14px;
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.task-summary small,
-.task-meta-row span {
+.task-summary small {
   min-width: 0;
   overflow: hidden;
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.task-summary small {
+  flex: 0 1 42%;
+  max-width: 42%;
+  text-align: right;
 }
 
 .task-message {
@@ -1655,22 +1726,49 @@ details.surface {
 }
 
 .task-meta-row {
+  align-items: flex-start;
   justify-content: flex-start;
   flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
 }
 
 .task-meta-row span {
+  display: inline-block;
+  flex: 0 1 auto;
   max-width: 100%;
+  min-height: 0;
+  overflow: visible;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 3px 7px;
+  border-radius: 6px;
+  padding: 5px 8px 6px;
   background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.task-row > .badge {
+  align-self: start;
+  max-width: 96px;
+  min-height: 28px;
+  overflow: hidden;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  line-height: 16px;
+  text-overflow: ellipsis;
 }
 
 .logs {
   min-height: 340px;
   max-height: 64vh;
+  max-height: 64dvh;
   overflow: auto;
+  scrollbar-gutter: stable;
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1808,6 +1906,7 @@ details.surface {
 
 .command-title {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -1815,9 +1914,13 @@ details.surface {
 
 .command-title > span,
 .command-item > span {
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .command-title .icon-button {
@@ -1826,9 +1929,11 @@ details.surface {
 }
 
 .command-box {
+  max-width: 100%;
   min-height: 58px;
   max-height: 160px;
   overflow: auto;
+  scrollbar-gutter: stable;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
@@ -1843,14 +1948,17 @@ details.surface {
 
 .checkline {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   grid-template-columns: none;
   gap: 8px;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .checkline input {
   width: 16px;
+  flex: 0 0 auto;
   min-height: 16px;
 }
 
@@ -2134,12 +2242,34 @@ small,
     justify-content: flex-start;
   }
 
-  .node-rail,
-  .project-list-panel,
-  .project-editor-panel,
-  .task-panel,
+  .node-rail {
+    max-height: min(34vh, 380px);
+    max-height: min(34dvh, 380px);
+  }
+
+  .project-list-panel {
+    max-height: min(38vh, 420px);
+    max-height: min(38dvh, 420px);
+  }
+
+  .project-editor-panel {
+    max-height: min(76vh, 760px);
+    max-height: min(76dvh, 760px);
+  }
+
+  .task-panel {
+    max-height: min(44vh, 460px);
+    max-height: min(44dvh, 460px);
+  }
+
   .task-detail {
-    max-height: none;
+    max-height: min(58vh, 620px);
+    max-height: min(58dvh, 620px);
+  }
+
+  .task-list {
+    max-height: min(34vh, 360px);
+    max-height: min(34dvh, 360px);
   }
 
   .node-summary {
@@ -2200,17 +2330,95 @@ small,
   }
 }
 
+@media (max-width: 760px) {
+  .app-shell {
+    display: block;
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+
+  .sidebar {
+    position: fixed;
+    z-index: 70;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: auto;
+    grid-template-rows: auto;
+    grid-template-columns: minmax(0, 1fr) 46px;
+    align-items: stretch;
+    gap: 8px;
+    border-top: 1px solid var(--line-strong);
+    border-right: 0;
+    padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
+    box-shadow: 0 -10px 26px rgba(37, 67, 96, 0.12);
+  }
+
+  .brand {
+    display: none;
+  }
+
+  .nav-list {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 3px;
+  }
+
+  .nav-group {
+    display: contents;
+  }
+
+  .nav-group p {
+    display: none;
+  }
+
+  .nav-list button {
+    min-width: 0;
+    min-height: 56px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 5px 2px;
+    font-size: 11px;
+    line-height: 1.05;
+    white-space: normal;
+  }
+
+  .nav-list button svg {
+    flex: 0 0 auto;
+  }
+
+  .bottom-action {
+    width: 46px;
+    min-height: 56px;
+    justify-content: center;
+    align-self: stretch;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .bottom-action svg {
+    flex: 0 0 auto;
+  }
+
+  .toast-stack {
+    bottom: calc(86px + env(safe-area-inset-bottom));
+  }
+}
+
 @media (max-width: 680px) {
   .main {
-    padding: 16px;
+    gap: 12px;
+    padding: 14px 12px 0;
   }
 
   .topbar {
     align-items: stretch;
     flex-direction: column;
+    gap: 10px;
   }
 
-  .top-actions,
   .inline-tools,
   .button-row,
   .task-toolbar {
@@ -2218,10 +2426,29 @@ small,
     flex-direction: column;
   }
 
+  .top-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px 40px;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .top-actions select {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .top-actions .theme-picker {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .top-actions > .icon-button {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
   .top-actions select,
-  .time-chip,
-  .theme-picker,
-  .theme-trigger,
   .compact-search,
   .compact-segmented,
   .task-view-switch,
@@ -2229,10 +2456,55 @@ small,
     width: 100%;
   }
 
+  .time-chip {
+    display: none;
+  }
+
+  .theme-picker,
+  .theme-trigger {
+    width: 40px;
+    min-width: 40px;
+  }
+
+  .theme-trigger {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .theme-trigger span {
+    display: none;
+  }
+
   .theme-menu {
     left: 0;
     right: auto;
+    width: min(180px, calc(100vw - 24px));
+  }
+
+  .surface {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .surface-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .surface-head .button-row,
+  .surface-head .inline-tools {
     width: 100%;
+  }
+
+  .surface-head > svg {
+    align-self: flex-start;
+    flex: 0 0 auto;
+  }
+
+  .surface h2 {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .metric-grid,
@@ -2240,27 +2512,368 @@ small,
   .telemetry-list,
   .node-resource-row,
   .summary-facts,
+  .form-grid,
+  .policy-grid,
+  .permission-grid,
+  .notification-grid,
+  .project-strip,
+  .command-list,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .metric-grid {
+    gap: 10px;
+  }
+
+  .metric-card {
+    min-height: 82px;
+    padding: 12px;
+  }
+
+  .metric-card strong {
+    font-size: 24px;
   }
 
   .node-resource-details {
     display: none;
   }
 
-  .resource-list,
+  .node-resource-panel,
+  .node-resource-list {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .node-resource-list {
+    padding-right: 0;
+  }
+
+  .node-resource-row {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 0;
+    align-items: stretch;
+    gap: 8px;
+    padding: 9px;
+    overflow: visible;
+  }
+
+  .node-resource-row > * {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  .node-resource-main,
+  .node-resource-copy,
+  .node-resource-title-row,
+  .node-resource-meta,
+  .node-resource-metrics,
+  .resource-mini {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .node-resource-main {
+    align-items: start;
+    grid-template-columns: 12px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .node-resource-main .status-dot {
+    margin-top: 5px;
+    margin-left: 0;
+  }
+
+  .node-resource-main strong,
+  .node-resource-main small {
+    display: block;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .node-resource-main strong {
+    display: -webkit-box;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .node-resource-meta {
+    display: flex;
+    min-height: 28px;
+    align-items: center;
+    flex-wrap: wrap;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .node-resource-meta em,
+  .node-resource-meta span {
+    max-width: 100%;
+  }
+
+  .node-resource-meta em {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .node-resource-meta span {
+    flex: 1 1 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .resource-list {
+    max-height: min(44vh, 420px);
+    max-height: min(44dvh, 420px);
+  }
+
   .node-resource-list,
   .compact-attention-actions {
+    max-height: min(48vh, 430px);
+    max-height: min(48dvh, 430px);
+  }
+
+  .node-resource-metrics {
+    gap: 6px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .resource-mini-head {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+  }
+
+  .resource-mini {
+    grid-template-rows: auto 9px;
+    min-height: 48px;
+    gap: 6px;
+    padding: 7px;
+    overflow: hidden;
+  }
+
+  .resource-mini svg {
+    display: none;
+  }
+
+  .resource-mini span,
+  .resource-mini strong {
+    max-width: 100%;
+    font-size: 11px;
+  }
+
+  .resource-mini .meter {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: 9px;
+    min-height: 9px;
+    overflow: hidden;
+  }
+
+  .resource-meter .meter-fill {
+    display: block;
+    height: 100%;
+    min-height: 100%;
+  }
+
+  .node-rail,
+  .project-list-panel {
+    max-height: min(36vh, 360px);
+    max-height: min(36dvh, 360px);
+  }
+
+  .project-editor-panel,
+  .task-detail {
     max-height: none;
+    overflow: visible;
+  }
+
+  .node-workspace .data-table,
+  .update-record-table,
+  .agent-table,
+  .update-list,
+  .task-list {
+    max-height: min(52vh, 460px);
+    max-height: min(52dvh, 460px);
   }
 
   .tabbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .tabbar button,
+  .segmented button {
+    min-width: 0;
+    padding-right: 6px;
+    padding-left: 6px;
+    white-space: normal;
+  }
+
+  .data-table {
+    gap: 8px;
+    overflow-x: visible;
+  }
+
+  .table-head {
+    display: none;
+  }
+
+  .table-row,
+  .image-table .table-row,
+  .agent-table .table-row,
+  .update-record-table .table-row {
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    background: var(--surface-soft);
+  }
+
+  .table-row > * {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 24px;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .table-row > *::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .table-row > [data-label=""]::before,
+  .table-row > :not([data-label])::before {
+    display: none;
+    content: "";
+  }
+
+  .table-row strong,
+  .table-row span,
+  .table-row em {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .table-row .row-actions {
+    justify-content: flex-end;
+  }
+
+  .compact-list {
+    max-height: min(44vh, 380px);
+    max-height: min(44dvh, 380px);
+  }
+
+  .dashboard-task-line {
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 5px 8px;
+    padding: 9px;
+    overflow: hidden;
+  }
+
+  .dashboard-task-line .badge {
+    grid-row: 1 / span 2;
+    align-self: start;
+    min-width: 48px;
+    max-width: 74px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dashboard-task-line strong,
+  .dashboard-task-line small {
+    min-width: 0;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .dashboard-task-line strong {
+    display: -webkit-box;
+    line-height: 1.25;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .dashboard-task-line small {
+    display: -webkit-box;
+    grid-column: 2;
+    line-height: 1.25;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
   .node-line,
   .task-row {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .task-row {
+    min-height: 0;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .task-row > .badge {
+    max-width: 74px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .task-main,
+  .task-summary,
+  .task-message,
+  .task-meta-row {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .task-summary strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .task-meta-row {
+    gap: 5px;
+  }
+
+  .task-meta-row span {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .node-line-meta {
@@ -2277,4 +2890,487 @@ small,
   .compact-actions {
     flex-wrap: wrap;
   }
+
+  .update-row {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .update-main span,
+  .update-main small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .attention-pill,
+  .project-row,
+  .project-pill,
+  .node-card,
+  .update-row,
+  .policy-editor,
+  .metric-card {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .attention-pill strong,
+  .attention-pill small,
+  .project-row strong,
+  .project-row span,
+  .project-pill strong,
+  .project-pill span,
+  .node-card strong,
+  .node-card small,
+  .update-main strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .update-row .segmented,
+  .update-row .compact-actions {
+    width: 100%;
+  }
+
+  .update-row .compact-actions {
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+
+  textarea {
+    min-height: 220px;
+  }
+
+  .compose-preview,
+  .logs {
+    min-height: 220px;
+    max-height: min(46vh, 420px);
+    max-height: min(46dvh, 420px);
+  }
+
+  .command-tabs {
+    width: 100%;
+  }
+
+  .node-install-drawer summary,
+  .advanced-box summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .command-box,
+  .install-command .command-box {
+    max-height: min(38vh, 320px);
+    max-height: min(38dvh, 320px);
+  }
+
+  .fact-grid {
+    grid-template-columns: minmax(86px, 0.38fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 380px) {
+  .nav-list button {
+    font-size: 10px;
+  }
+
+  .bottom-action {
+    width: 42px;
+  }
+
+  .top-actions {
+    grid-template-columns: minmax(0, 1fr) 38px 38px;
+  }
+
+  .theme-picker,
+  .theme-trigger,
+  .top-actions > .icon-button {
+    width: 38px;
+    min-width: 38px;
+  }
+}
+
+@media (max-width: 680px) {
+  .main,
+  .view-stack,
+  .dashboard-grid,
+  .workbench,
+  .node-workspace,
+  .project-layout,
+  .task-layout,
+  .surface,
+  .surface > *,
+  .surface-head,
+  .node-install-builder,
+  .compose-editor,
+  .form-stack,
+  .form-grid,
+  .policy-grid,
+  .settings-grid,
+  .permission-grid,
+  .project-meta,
+  .task-meta,
+  .capability-grid {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .surface,
+  .node-rail,
+  .node-workspace,
+  .project-list-panel,
+  .project-editor-panel,
+  .task-panel,
+  .task-detail {
+    overflow: visible;
+  }
+
+  .node-rail,
+  .node-resource-list,
+  .compact-attention-actions,
+  .compact-list,
+  .project-list-panel,
+  .project-editor-panel,
+  .node-workspace .data-table,
+  .update-record-table,
+  .agent-table,
+  .update-list,
+  .task-panel,
+  .task-detail,
+  .task-list {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .surface-head,
+  .topbar,
+  .inline-tools,
+  .button-row,
+  .task-toolbar,
+  .project-meta,
+  .task-meta,
+  .capability-grid,
+  .install-summary,
+  .user-list {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .button-row > button:not(.icon-button),
+  .inline-tools > *,
+  .task-toolbar > *,
+  .policy-editor > *,
+  .form-grid > *,
+  .settings-grid > *,
+  .permission-grid > *,
+  label,
+  input,
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .surface-head .button-row > button:not(.icon-button),
+  .node-summary .button-row > button:not(.icon-button),
+  .project-editor-panel .button-row > button:not(.icon-button),
+  .task-panel .button-row > button:not(.icon-button),
+  .form-stack button:not(.icon-button) {
+    width: 100%;
+  }
+
+  .secondary,
+  .primary,
+  .ghost,
+  .checkline,
+  .capability-toggle,
+  .compact-check {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .node-card {
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 6px 9px;
+    overflow: hidden;
+  }
+
+  .node-card small,
+  .node-card em {
+    grid-column: 2;
+  }
+
+  .node-card em {
+    grid-row: auto;
+    justify-self: start;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .node-card strong,
+  .node-card small,
+  .node-summary h2,
+  .summary-facts span,
+  .summary-facts strong,
+  .node-install-drawer summary,
+  .node-install-drawer summary span,
+  .node-install-drawer summary small,
+  .advanced-box summary,
+  .advanced-box p,
+  .project-meta > span,
+  .task-meta > span,
+  .project-meta .meta-value,
+  .task-meta .meta-value {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .node-summary {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    overflow: hidden;
+  }
+
+  .summary-facts,
+  .project-meta,
+  .task-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .summary-facts strong,
+  .project-meta .meta-value,
+  .task-meta .meta-value {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .tabbar {
+    overflow: hidden;
+  }
+
+  .tabbar button {
+    min-height: 44px;
+    line-height: 1.2;
+  }
+
+  .compact-segmented {
+    grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  }
+
+  .segmented {
+    min-width: 0;
+  }
+
+  .segmented button {
+    min-height: 38px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .data-table,
+  .table-row,
+  .image-table .table-row,
+  .agent-table .table-row,
+  .update-record-table .table-row {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .table-row > * {
+    display: grid;
+    grid-template-columns: minmax(72px, 0.36fr) minmax(0, 1fr);
+    align-items: start;
+    justify-content: stretch;
+    gap: 8px;
+    text-align: left;
+  }
+
+  .table-row > *::before {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .table-row strong,
+  .table-row span,
+  .table-row em {
+    min-width: 0;
+    max-width: 100%;
+    text-align: left;
+    word-break: break-word;
+  }
+
+  .table-row .row-actions {
+    display: flex;
+    grid-template-columns: none;
+    justify-content: flex-start;
+  }
+
+  .project-strip,
+  .notification-grid,
+  .project-list {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .project-row,
+  .project-pill,
+  .update-row,
+  .attention-pill,
+  .task-row,
+  .task-line,
+  .telemetry-line,
+  .resource-card,
+  .metric-card,
+  .policy-editor {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .project-row strong,
+  .project-row span,
+  .project-row small,
+  .project-pill strong,
+  .project-pill span,
+  .project-pill small,
+  .update-main strong,
+  .update-main span,
+  .update-main small,
+  .attention-pill strong,
+  .attention-pill small,
+  .task-row strong,
+  .task-row small,
+  .task-line strong,
+  .task-line small,
+  .telemetry-text,
+  .telemetry-text strong,
+  .telemetry-text small {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .attention-pill {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .attention-pill small {
+    grid-column: 2;
+  }
+
+  .update-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .update-row > *,
+  .update-row .schedule-input,
+  .update-row .segmented,
+  .update-row .compact-check,
+  .update-row .compact-actions {
+    grid-column: auto;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .task-row,
+  .task-line {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .task-main,
+  .task-summary,
+  .task-message,
+  .task-meta-row,
+  .task-counts {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .task-meta-row span,
+  .task-counts span {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .command-title {
+    align-items: flex-start;
+  }
+
+  .command-box,
+  .compose-preview,
+  .logs {
+    max-width: 100%;
+    overflow: auto;
+    word-break: break-word;
+  }
+
+  .fact-grid {
+    grid-template-columns: minmax(72px, 0.34fr) minmax(0, 1fr);
+  }
+
+  .fact-grid strong,
+  .fact-grid span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  flex: 0 0 auto;
+  gap: 10px;
+  height: auto;
+  min-height: 84px;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.task-row > .badge {
+  flex: 0 0 auto;
+}
+
+.task-row .task-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.task-main {
+  overflow: visible;
+}
+
+.task-meta-row {
+  min-height: 0;
+  align-items: stretch;
+  gap: 6px;
+  overflow: visible;
+  padding-bottom: 3px;
+}
+
+.task-meta-row span {
+  display: block;
+  min-height: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  padding: 2px 0;
+  background: transparent;
+  line-height: 1.8;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
